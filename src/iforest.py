@@ -1,6 +1,29 @@
 import typing as t
 import numpy as np
-from . import InternalNode, ExternalNode
+
+
+class ExternalNode:
+    def __init__(self, size: int, data):
+        self.size = size 
+        self.data = data
+
+
+class InternalNode:
+    pass
+
+
+class InternalNode:
+    def __init__(
+        self, 
+        left: ExternalNode | InternalNode, 
+        right: ExternalNode | InternalNode,
+        split_attribute: int,
+        split_value: int | float
+    ):
+        self.left = left
+        self.right = right
+        self.split_attribute = split_attribute
+        self.split_value = split_value
 
 
 class ITree:
@@ -42,8 +65,8 @@ class ITree:
 
 
 class IForest:
-    def __init__(self, tree_size: int = 100, sub_sample_size: int = 256):
-        self.tree_size = tree_size
+    def __init__(self, n_trees: int = 100, sub_sample_size: int = 256):
+        self.n_trees = n_trees
         self.sub_sample_size = sub_sample_size
         
         self.height_limit: int = np.ceil(np.log2(self.sub_sample_size))
@@ -77,8 +100,8 @@ class IForest:
         """
         self.itrees = []
 
-        for _ in range(self.tree_size):
-            indexes = np.random.randint(0, X.shape[0], size=self.sub_sample_size)
+        for _ in range(self.n_trees):
+            indexes = np.random.choice(range(0, X.shape[0]), size=self.sub_sample_size, replace=False)
             X_sub = X[indexes]
 
             # build the isolation tree for the selected sub samples
@@ -107,7 +130,7 @@ class IForest:
 
     def avg_path_length(self, x: np.ndarray) -> float:
         """
-        Computes the average path length for a given sample
+        Computes the average path length for a single sample
         among all trained isolation trees.
         """
         path_lengths = np.array([self.path_length(x, itree) for itree in self.itrees])
@@ -115,13 +138,13 @@ class IForest:
     
     def score(self, x: np.ndarray) -> float:
         """
-        Computes the score for the given sample.
+        Computes the score for a single sample.
         """
         return np.power(2, -1 * self.avg_path_length(x) / self.normalization)
 
     def scores(self, X: np.ndarray) -> np.ndarray:
         """
-        Computes the score for all samples in a dataset.
+        Computes the score for all dataset with multiple samples.
         """
         scores = np.array([self.score(x) for x in X])
         return scores
