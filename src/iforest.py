@@ -1,6 +1,7 @@
 import typing as t
 import numpy as np
 
+from multiprocessing import Pool
 
 class ExternalNode:
     def __init__(self, size: int, data):
@@ -65,9 +66,10 @@ class ITree:
 
 
 class IForest:
-    def __init__(self, n_trees: int = 100, sub_sample_size: int = 256):
+    def __init__(self, n_trees: int = 100, sub_sample_size: int = 256, n_processes: int = 8):
         self.n_trees = n_trees
         self.sub_sample_size = sub_sample_size
+        self.n_processes = n_processes
         
         self.height_limit: int = np.ceil(np.log2(self.sub_sample_size))
         self.normalization: float = self.c(sub_sample_size)
@@ -89,6 +91,22 @@ class IForest:
 
         return 0.0
 
+    def fit_itree(self, _) -> t.Optional[ITree]:
+        """
+        Fits a single ITree, assuming the data set 
+        was already defined in the IForest object.
+        """
+        if self.X is None:
+            return
+        
+        indexes = np.random.choice(range(0, self.X.shape[0]), size=self.sub_sample_size, replace=False)
+        X_sub = self.X[indexes]
+
+        itree = ITree(height=0, height_limit=self.height_limit)
+        itree.fit(X_sub)
+
+        return itree
+
     def fit(self, X: np.ndarray):
         """
         Fits an ensemble of isolation trees for the given data.
@@ -98,17 +116,14 @@ class IForest:
         X: np.ndarray
             Data that needs to be fit.        
         """
-        self.itrees = []
+        self.X = X
 
-        for _ in range(self.n_trees):
-            indexes = np.random.choice(range(0, X.shape[0]), size=self.sub_sample_size, replace=False)
-            X_sub = X[indexes]
-
-            # build the isolation tree for the selected sub samples
-            itree = ITree(height=0, height_limit=self.height_limit)
-            itree.fit(X_sub)
-
-            self.itrees.append(itree)
+        # use a pool to compute the trees in parallel
+        with Pool(processes=self.n_processes) as pool:
+            # assign the scitree training to the pool
+            itrees = pool.map(self.fit_itree, range(self.n_trees))
+        
+        self.itrees = itrees 
 
     def path_length(self, x: np.ndarray, itree: ITree) -> float:
         """

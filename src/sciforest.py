@@ -1,4 +1,3 @@
-import time
 import typing as t
 import numpy as np
 
@@ -53,10 +52,8 @@ class SCITree:
         coeffs = np.random.uniform(-1, 1, size=(self.n_hyperplanes, self.n_attributes))
         attrs = np.random.choice(range(0, X.shape[1]), size=(self.n_hyperplanes, self.n_attributes))
 
-        # compute the projections onto the hyperplanes  
-        Ys = np.array([self.hyperplane_projection(X, coeffs[i], attrs[i]) for i in range(self.n_hyperplanes)])
-        
-        # compute the best splitting value for each hyperplane
+        # compute the projections onto the hyperplanes, and select the best one  
+        Ys = np.array([self.hyperplane_projection(X, coeffs[i], attrs[i]) for i in range(self.n_hyperplanes)])        
         Y_best_idx, Y_best_split_value = self.hyperplane_select(Ys)
         Y = Ys[Y_best_idx]
 
@@ -88,6 +85,17 @@ class SCITree:
         return projection
     
     def hyperplane_projection_from_node(self, x: np.ndarray, node: InternalNode) -> float:
+        """
+        Projects a single sample using the coefficients and
+        the attributes from the given node. Used mainly for inference.
+
+        Parameters:
+        -----------
+        x: np.ndarray
+            Single sample.
+        node: InternalNode
+            Current node where the sample is positioned in the SCITree.
+        """
         projection = 0
 
         for i in range(self.n_attributes):
@@ -136,9 +144,10 @@ class SCITree:
 
 
 class SCIForest:
-    def __init__(self, n_trees: int = 100, sub_sample_size: int = 256):
+    def __init__(self, n_trees: int = 100, sub_sample_size: int = 256, n_processes: int = 8):
         self.n_trees = n_trees
         self.sub_sample_size = sub_sample_size
+        self.n_processes = n_processes
 
         self.normalization: float = self.c(sub_sample_size)
         self.scitrees: t.List[SCITree] = []
@@ -159,9 +168,16 @@ class SCIForest:
 
         return 0.0
 
-    def fit_scitree(self, X: np.ndarray) -> SCITree:
-        indexes = np.random.choice(range(0, X.shape[0]), size=self.sub_sample_size, replace=False)
-        X_sub = X[indexes]
+    def fit_scitree(self, _) -> t.Optional[SCITree]:
+        """
+        Fits a single SCITree, assuming the data set 
+        was already defined in the SCIForest object.
+        """
+        if self.X is None:
+            return
+        
+        indexes = np.random.choice(range(0, self.X.shape[0]), size=self.sub_sample_size, replace=False)
+        X_sub = self.X[indexes]
 
         scitree = SCITree()
         scitree.fit(X_sub)
@@ -177,28 +193,15 @@ class SCIForest:
         X: np.ndarray
             Data that needs to be fit.        
         """
-        self.scitrees = []
+        self.X = X
 
-        for i in range(self.n_trees):
-            indexes = np.random.choice(range(0, X.shape[0]), size=self.sub_sample_size, replace=False)
-            X_sub = X[indexes]
-
-            # build the scitree for the selected sub samples
-            scitree = SCITree()
-            scitree.fit(X_sub)
-
-            self.scitrees.append(scitree)
-    
-    def fit_parallel(self, X: np.ndarray):
-        # Prepare the pool for multiprocessing
-        with Pool(processes=5) as pool:
-            # Create sub samples and fit the trees in parallel
-            scitrees = pool.map(self.fit_scitree, [X] * self.n_trees)
+        # use a pool to compute the trees in parallel
+        with Pool(processes=self.n_processes) as pool:
+            # assign the scitree training to the pool
+            scitrees = pool.map(self.fit_scitree, range(self.n_trees))
         
-        # Assign fitted trees to the scitrees attribute
-        self.scitrees = scitrees        
-
-
+        self.scitrees = scitrees 
+    
     def path_length(self, x: np.ndarray, scitree: SCITree) -> float:
         """
         Computes the path length for a given sample
