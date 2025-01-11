@@ -1,0 +1,10 @@
+# Ignore all pycache directories
+**/__pycache__/
+
+# Ignore .pyc files
+*.pyc
+
+# Other common Python-related files to ignore
+*.pyo
+*.pyd
+__init__.pyc
