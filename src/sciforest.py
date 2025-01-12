@@ -76,7 +76,15 @@ class SCITree:
         node_left = SCITree(self.height + 1, self.height_limit).fit(X_left)
         node_right = SCITree(self.height + 1, self.height_limit).fit(X_right)
 
-        self.root = InternalNode(node_left, node_right, Y_best_split_value, coeffs[Y_best_idx], attrs[Y_best_idx], attrs_stds, limit)
+        self.root = InternalNode(
+            node_left, 
+            node_right, 
+            Y_best_split_value, 
+            coeffs[Y_best_idx], 
+            attrs[Y_best_idx], 
+            attrs_stds, 
+            limit
+        )
         return self.root
 
     def hyperplane_projection(
