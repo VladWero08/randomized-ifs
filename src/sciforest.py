@@ -36,21 +36,28 @@ class InternalNode:
 class SCITree:
     def __init__(
         self, 
+        height: int,
+        height_limit: int,
         n_attributes: int = 2, 
         n_hyperplanes: int = 5
     ) -> None:
+        self.height = height
+        self.height_limit = height_limit
         self.n_attributes = n_attributes
         self.n_hyperplanes = n_hyperplanes
-        self.root: InternalNode = None
+        self.root: InternalNode | ExternalNode = None
 
     def fit(self, X: np.ndarray) -> InternalNode | ExternalNode:
-        if X.shape[0] <= 2:
+        if self.height >= self.height_limit or X.shape[0] <= 2:
             self.root = ExternalNode(size=X.shape[0], data=X)
             return self.root
         
         # randomly select coefficients and attributes for the hyperplanes
         coeffs = np.random.uniform(-1, 1, size=(self.n_hyperplanes, self.n_attributes))
-        attrs = np.random.choice(range(0, X.shape[1]), size=(self.n_hyperplanes, self.n_attributes))
+        attrs = np.array([
+            np.random.choice(range(0, X.shape[1]), size=(self.n_attributes), replace=False) 
+            for _ in range(self.n_hyperplanes)
+        ])
 
         # compute the projections onto the hyperplanes, and select the best one  
         Ys = np.array([self.hyperplane_projection(X, coeffs[i], attrs[i]) for i in range(self.n_hyperplanes)])        
@@ -66,13 +73,18 @@ class SCITree:
         limit = max(Y) - min(Y)
 
         # compute the left and right side of the tree
-        node_left = SCITree().fit(X_left)
-        node_right = SCITree().fit(X_right)
+        node_left = SCITree(self.height + 1, self.height_limit).fit(X_left)
+        node_right = SCITree(self.height + 1, self.height_limit).fit(X_right)
 
         self.root = InternalNode(node_left, node_right, Y_best_split_value, coeffs[Y_best_idx], attrs[Y_best_idx], attrs_stds, limit)
         return self.root
 
-    def hyperplane_projection(self, X: np.ndarray, coefficients: np.ndarray, attributes: np.ndarray) -> np.ndarray | float:
+    def hyperplane_projection(
+        self, 
+        X: np.ndarray, 
+        coefficients: np.ndarray, 
+        attributes: np.ndarray
+    ) -> np.ndarray | float:
         """
         Projects the given dataset using the coefficients 
         and the attributes given.
@@ -84,7 +96,11 @@ class SCITree:
 
         return projection
     
-    def hyperplane_projection_from_node(self, x: np.ndarray, node: InternalNode) -> float:
+    def hyperplane_projection_from_node(
+        self, 
+        x: np.ndarray, 
+        node: InternalNode
+    ) -> float:
         """
         Projects a single sample using the coefficients and
         the attributes from the given node. Used mainly for inference.
@@ -105,14 +121,14 @@ class SCITree:
 
     def hyperplane_select(self, Ys: np.ndarray) -> t.Tuple[int, float]:
         """
-        Computes the SDGain for every hyperplane projection, searching
-        for the best split value for each one. The scope is to search
-        for the hyperplane and split value that lead to the best SDGain. 
+        Computes the average gain obtained from each hyperplane, searching
+        for the best split value for each of them. The scope is to find
+        the hyperplane and split value that lead to the best average gain. 
         
         Parameters:
         -----------
         Ys: np.ndarray
-            Projection of the data (X) onto the hyperplanes (coefficients and random attributes).
+            Projection of the data onto the hyperplanes.
 
         Returns:
         --------
@@ -127,7 +143,7 @@ class SCITree:
             for split_value in Y:
                 Y_left = Y[Y < split_value]
                 Y_right = Y[Y >= split_value]
-                std_gain = self.std_gain(Y, Y_left, Y_right)
+                std_gain = self.avg_gain(Y, Y_left, Y_right)
 
                 if std_gain > best_std_gain:
                     best_std_gain = std_gain
@@ -136,25 +152,33 @@ class SCITree:
 
         return index, best_split_value
 
-    def std_gain(self, Y: np.ndarray, Y_left: np.ndarray, Y_right: np.ndarray) -> float:
+    def avg_gain(self, Y: np.ndarray, Y_left: np.ndarray, Y_right: np.ndarray) -> float:
         """
-        Computes the SDgain for the given projections and splits.
+        Computes the averaged gain for the given projections and splits.
         """
         return (np.std(Y) - (np.std(Y_left) + np.std(Y_right)) / 2) / np.std(Y)
 
 
 class SCIForest:
-    def __init__(self, n_trees: int = 100, sub_sample_size: int = 256, n_processes: int = 8):
+    def __init__(
+        self, 
+        n_trees: int = 100, 
+        sub_sample_size: int = 256, 
+        height_limit: t.Optional[int] = None,
+        n_processes: int = 8
+    ):
         self.n_trees = n_trees
         self.sub_sample_size = sub_sample_size
         self.n_processes = n_processes
 
-        self.normalization: float = self.c(sub_sample_size)
-        self.scitrees: t.List[SCITree] = []
+        self.height_limit: int = height_limit if height_limit else np.ceil(np.log2(self.sub_sample_size))
+        self.expected_depth: float = self.c(sub_sample_size)
+        self.sci_trees: t.List[SCITree] = []
 
     def c(self, size: int) -> float:
         """
-        Sets the normalization constant based on the number of sub-samples.
+        Sets the expected depth of a SCI Tree 
+        based on the number of sub-samples.
 
         Parameters:
         -----------
@@ -168,10 +192,10 @@ class SCIForest:
 
         return 0.0
 
-    def fit_scitree(self, _) -> t.Optional[SCITree]:
+    def fit_sci_tree(self, _) -> t.Optional[SCITree]:
         """
-        Fits a single SCITree, assuming the data set 
-        was already defined in the SCIForest object.
+        Fits a single SCI tree, assuming the data set 
+        was already defined in the SCI forest object.
         """
         if self.X is None:
             return
@@ -179,14 +203,14 @@ class SCIForest:
         indexes = np.random.choice(range(0, self.X.shape[0]), size=self.sub_sample_size, replace=False)
         X_sub = self.X[indexes]
 
-        scitree = SCITree()
-        scitree.fit(X_sub)
+        sci_tree = SCITree(height=0, height_limit=self.height_limit)
+        sci_tree.fit(X_sub)
 
-        return scitree
+        return sci_tree
 
-    def fit(self, X: np.ndarray):
+    def fit(self, X: np.ndarray) -> None:
         """
-        Fits an ensemble of SCItrees for the given data.
+        Fits an ensemble of SCI trees for the given data.
 
         Parameters:
         -----------
@@ -198,21 +222,30 @@ class SCIForest:
         # use a pool to compute the trees in parallel
         with Pool(processes=self.n_processes) as pool:
             # assign the scitree training to the pool
-            scitrees = pool.map(self.fit_scitree, range(self.n_trees))
+            sci_trees = pool.map(self.fit_sci_tree, range(self.n_trees))
         
-        self.scitrees = scitrees 
+        self.sci_trees = sci_trees 
     
-    def path_length(self, x: np.ndarray, scitree: SCITree) -> float:
+    def path_length(self, x: np.ndarray, sci_tree: SCITree) -> float:
         """
-        Computes the path length for a given sample
-        in the SCisolation tree.
+        Computes the path length for a given sample in the given SCI tree.
+
+        The path value starts from 0. After each movement
+        from a node to another, the path is incremented
+        only if the point lies inside the acceptance range:
+
+        `[split value - limit, split value + limit]`
+
+        After reaching an external node (leaf), the path
+        calculated until that point is returned plus an adjustment
+        for the subtree that was not continued beyond the height limit.
         """
-        node = scitree.root
+        node = sci_tree.root
         path = 0
 
         while not isinstance(node, ExternalNode):
             # project the sample onto the hyperplane
-            y = scitree.hyperplane_projection_from_node(x, node)
+            y = sci_tree.hyperplane_projection_from_node(x, node)
 
             if y < node.split_value:
                 # check if the projection is inside 
@@ -230,20 +263,20 @@ class SCIForest:
     def avg_path_length(self, x: np.ndarray) -> float:
         """
         Computes the average path length for a single sample
-        among all trained SCisolation trees.
+        among all trained SCI trees.
         """
-        path_lengths = np.array([self.path_length(x, itree) for itree in self.scitrees])
+        path_lengths = np.array([self.path_length(x, sci_tree) for sci_tree in self.sci_trees])
         return np.mean(path_lengths)
 
     def score(self, x: np.ndarray) -> float:
         """
         Computes the score for a single sample.
         """
-        return np.power(2, -1 * self.avg_path_length(x) / self.normalization)
+        return np.power(2, -1 * self.avg_path_length(x) / self.expected_depth)
 
     def scores(self, X: np.ndarray) -> np.ndarray:
         """
-        Computes the score for all dataset with multiple samples.
+        Computes the score for a dataset with multiple samples.
         """
         scores = np.array([self.score(x) for x in X])
         return scores

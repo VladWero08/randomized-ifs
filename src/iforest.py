@@ -31,7 +31,7 @@ class ITree:
     def __init__(self, height: int, height_limit: int):
         self.height = height
         self.height_limit = height_limit
-        self.root = None
+        self.root: InternalNode | ExternalNode = None
 
     def fit(self, X: np.ndarray) -> InternalNode | ExternalNode:
         """
@@ -66,18 +66,25 @@ class ITree:
 
 
 class IForest:
-    def __init__(self, n_trees: int = 100, sub_sample_size: int = 256, n_processes: int = 8):
+    def __init__(
+        self, 
+        n_trees: int = 100, 
+        sub_sample_size: int = 256, 
+        height_limit: t.Optional[int] = None,
+        n_processes: int = 8
+    ):
         self.n_trees = n_trees
         self.sub_sample_size = sub_sample_size
         self.n_processes = n_processes
         
-        self.height_limit: int = np.ceil(np.log2(self.sub_sample_size))
-        self.normalization: float = self.c(sub_sample_size)
+        self.height_limit: int = height_limit if height_limit else np.ceil(np.log2(self.sub_sample_size))
+        self.expected_depth: float = self.c(sub_sample_size)
         self.itrees: t.List[ITree] = []
 
     def c(self, size: int) -> float:
         """
-        Sets the normalization constant based on the number of sub-samples.
+        Sets the expected depth of a iTree 
+        based on the number of sub-samples.
 
         Parameters:
         -----------
@@ -107,7 +114,7 @@ class IForest:
 
         return itree
 
-    def fit(self, X: np.ndarray):
+    def fit(self, X: np.ndarray) -> None:
         """
         Fits an ensemble of isolation trees for the given data.
 
@@ -127,19 +134,27 @@ class IForest:
 
     def path_length(self, x: np.ndarray, itree: ITree) -> float:
         """
-        Computes the path length for a given sample
-        in the given isolation tree.
+        Computes the path length for a given sample in the given ITree.
+
+        The path value starts from 0. After each movement
+        from a node to another, the path is incremented.
+
+        After reaching an external node (leaf), the path
+        calculated until that point is returned plus an adjustment
+        for the subtree that was not continued beyond the height limit.
         """
         node = itree.root
         path = 0
 
         while not isinstance(node, ExternalNode):
-            path += 1
+            y = x[node.split_attribute]
 
-            if x[node.split_attribute] < node.split_value:
+            if y < node.split_value:
                 node = node.left
             else:
                 node = node.right
+
+            path += 1
 
         return path + self.c(node.size)
 
@@ -155,7 +170,7 @@ class IForest:
         """
         Computes the score for a single sample.
         """
-        return np.power(2, -1 * self.avg_path_length(x) / self.normalization)
+        return np.power(2, -1 * self.avg_path_length(x) / self.expected_depth)
 
     def scores(self, X: np.ndarray) -> np.ndarray:
         """
