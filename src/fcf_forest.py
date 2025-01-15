@@ -1,7 +1,8 @@
 import typing as t
 import numpy as np
-
-from multiprocessing import Pool
+import matplotlib.pyplot as plt
+import matplotlib.figure
+import multiprocessing
 
 
 class ExternalNode:
@@ -200,9 +201,9 @@ class FCFForest:
     ):
         self.n_trees = n_trees
         self.sub_sample_size = sub_sample_size
-        self.n_processes = n_processes
-
+        self.n_processes: int = n_processes if n_processes else multiprocessing.cpu_count()
         self.height_limit: int = height_limit if height_limit else np.ceil(np.log2(self.sub_sample_size))
+    
         self.expected_depth: float = self.c(sub_sample_size)
         self.fcf_trees: t.List[FCFTree] = []
 
@@ -218,9 +219,9 @@ class FCFForest:
             search for a BST is computed on. 
         """        
         if size > 2:
-            H = np.log(size) + 0.5772156649
-            return 2 * H * (size - 1) - 2 * (size - 1) / size
-
+            H = np.log(size - 1) + 0.5772156649
+            return 2 * H - 2 * (size - 1) / size
+        
         if size == 2:
             return 1
 
@@ -254,7 +255,7 @@ class FCFForest:
         self.X = X
 
         # use a pool to compute the trees in parallel
-        with Pool(processes=self.n_processes) as pool:
+        with multiprocessing.Pool(processes=self.n_processes) as pool:
             # assign the scitree training to the pool
             fcf_trees = pool.map(self.fit_fcf_tree, range(self.n_trees))
         
@@ -306,3 +307,29 @@ class FCFForest:
         Computes the score for a dataset with multiple samples.
         """
         return np.array([self.score(x) for x in X])
+    
+    def decision_area(self) -> t.Optional[matplotlib.figure.Figure]:
+        """
+        Computes the decision area for the fitted data,
+        only if the data is 2-dimensional.
+        """
+        if self.X is None:
+            return None
+        
+        if self.X.shape[1] != 2:
+            return None
+
+        xx, yy = np.meshgrid(
+            np.linspace(self.X[:, 0].min(), self.X[:, 0].max(), 100),
+            np.linspace(self.X[:, 1].min(), self.X[:, 1].max(), 100),
+        )
+        points = np.c_[xx.ravel(), yy.ravel()]
+        scores = self.scores(points)
+        scores = scores.reshape(xx.shape)
+
+        fig, ax = plt.subplots(figsize=(10, 8))
+        contour = ax.contourf(xx, yy, scores, levels=30, cmap="coolwarm")
+        cbar = fig.colorbar(contour, ax=ax)
+        ax.set_title("FCF")
+
+        return fig

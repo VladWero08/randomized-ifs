@@ -1,7 +1,8 @@
 import typing as t
 import numpy as np
-
-from multiprocessing import Pool
+import matplotlib.pyplot as plt
+import matplotlib.figure
+import multiprocessing
 
 
 class ExternalNode:
@@ -80,15 +81,15 @@ class EIForest:
     ):
         self.n_trees = n_trees
         self.sub_sample_size = sub_sample_size
-        self.n_processes = n_processes
-        
+        self.n_processes: int = n_processes if n_processes else multiprocessing.cpu_count()
         self.height_limit: int = height_limit if height_limit else np.ceil(np.log2(self.sub_sample_size))
+        
         self.expected_depth: float = self.c(sub_sample_size)
         self.ei_trees: t.List[EITree] = []
 
     def c(self, size: int) -> float:
         """
-        Sets the expected depth of a EITree 
+        Sets the expected depth of a iTree 
         based on the number of sub-samples.
 
         Parameters:
@@ -98,8 +99,8 @@ class EIForest:
             search for a BST is computed on. 
         """        
         if size > 2:
-            H = np.log(size) + 0.5772156649
-            return 2 * H * (size - 1) - 2 * (size - 1) / size
+            H = np.log(size - 1) + 0.5772156649
+            return 2 * H - 2 * (size - 1) / size
 
         if size == 2:
             return 1
@@ -134,7 +135,7 @@ class EIForest:
         self.X = X
 
         # use a pool to compute the trees in parallel
-        with Pool(processes=self.n_processes) as pool:
+        with multiprocessing.Pool(processes=self.n_processes) as pool:
             # assign the EITree training to the pool
             ei_trees = pool.map(self.fit_ei_tree, range(self.n_trees))
         
@@ -187,41 +188,28 @@ class EIForest:
         scores = np.array([self.score(x) for x in X])
         return scores
 
+    def decision_area(self) -> t.Optional[matplotlib.figure.Figure]:
+        """
+        Computes the decision area for the fitted data,
+        only if the data is 2-dimensional.
+        """
+        if self.X is None:
+            return None
+        
+        if self.X.shape[1] != 2:
+            return None
 
-if __name__ == "__main__":
-    import matplotlib.pyplot as plt
-    import time 
-    from pyod.utils.data import generate_data_clusters
+        xx, yy = np.meshgrid(
+            np.linspace(self.X[:, 0].min(), self.X[:, 0].max(), 100),
+            np.linspace(self.X[:, 1].min(), self.X[:, 1].max(), 100),
+        )
+        points = np.c_[xx.ravel(), yy.ravel()]
+        scores = self.scores(points)
+        scores = scores.reshape(xx.shape)
 
-    contamination = 0.1
-    X_train, X_test, y_train, y_test = generate_data_clusters(n_train=1000, n_test=200, n_clusters=2, n_features=2, contamination=contamination)
-    
-    sciforest = EIForest(n_trees=100)
-    start = time.time()
-    sciforest.fit(X_train)
-    end = time.time()
-    print(f"Time: {end - start}s")
+        fig, ax = plt.subplots(figsize=(10, 8))
+        contour = ax.contourf(xx, yy, scores, levels=30, cmap="coolwarm")
+        cbar = fig.colorbar(contour, ax=ax)
+        ax.set_title("EIF")
 
-    X_train_scores = sciforest.scores(X_train)
-    X_test_scores = sciforest.scores(X_test)
-    
-    threshold = np.quantile(X_train_scores, 1 - contamination)
-    
-    X_train_preds = np.array([int(label) for label in (X_train_scores > threshold)])
-    X_test_preds = np.array([int(label) for label in (X_test_scores > threshold)])
-
-    print(f"Train ACC: {np.mean(X_train_preds == y_train)}")
-    print(f"Test ACC: {np.mean(X_test_preds == y_test)}")
-
-    fig, axs = plt.subplots(1, 2, figsize=(10, 4))
-    axs[0].scatter(X_train[y_train == 0][:, 0], X_train[y_train == 0][:, 1], color="blue", label="normal")
-    axs[0].scatter(X_train[y_train == 1][:, 0], X_train[y_train == 1][:, 1], color="red", label="anomaly")
-    axs[0].set_title("Ground truth for train")
-    axs[0].legend()
-
-    axs[1].scatter(X_train[X_train_preds == 0][:, 0], X_train[X_train_preds == 0][:, 1], color="blue", label="normal")
-    axs[1].scatter(X_train[X_train_preds == 1][:, 0], X_train[X_train_preds == 1][:, 1], color="red", label="anomaly")
-    axs[1].set_title("Predictions for train")
-    axs[1].legend()
-
-    plt.show()
+        return fig
