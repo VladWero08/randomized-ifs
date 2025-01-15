@@ -3,6 +3,7 @@ import numpy as np
 
 from multiprocessing import Pool
 
+
 class ExternalNode:
     def __init__(self, size: int, data):
         self.size = size 

@@ -208,7 +208,7 @@ class FCFForest:
 
     def c(self, size: int) -> float:
         """
-        Sets the expected depth of a FCF Tree 
+        Sets the expected depth of a FCFTree 
         based on the number of sub-samples.
 
         Parameters:
@@ -228,7 +228,7 @@ class FCFForest:
     
     def fit_fcf_tree(self, _) -> t.Optional[FCFTree]:
         """
-        Fits a single FCF tree, assuming the data set 
+        Fits a single FCFTree, assuming the data set 
         was already defined in the FCF forest object.
         """
         if self.X is None:
@@ -244,7 +244,7 @@ class FCFForest:
 
     def fit(self, X: np.ndarray):
         """
-        Fits an ensemble of FCF trees for the given data.
+        Fits an ensemble of FCFTrees for the given data.
 
         Parameters:
         -----------
@@ -263,7 +263,7 @@ class FCFForest:
 
     def path_length(self, x: np.ndarray, fcf_tree: FCFTree) -> float:
         """
-        Computes the path length for a given sample in the given FCF tree.
+        Computes the path length for a given sample in the given FCFTree.
 
         The path value starts from 0. After each movement
         from a node to another, the path is incremented.
@@ -290,7 +290,7 @@ class FCFForest:
     def avg_path_length(self, x: np.ndarray) -> float:
         """
         Computes the average path length for a single sample
-        among all trained FCF trees.
+        among all trained FCFTrees.
         """
         path_lengths = np.array([self.path_length(x, sci_tree) for sci_tree in self.fcf_trees])
         return np.mean(path_lengths)

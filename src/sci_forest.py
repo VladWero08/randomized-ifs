@@ -204,7 +204,7 @@ class SCIForest:
 
     def c(self, size: int) -> float:
         """
-        Sets the expected depth of a SCI Tree 
+        Sets the expected depth of a SCITree 
         based on the number of sub-samples.
 
         Parameters:
@@ -224,7 +224,7 @@ class SCIForest:
 
     def fit_sci_tree(self, _) -> t.Optional[SCITree]:
         """
-        Fits a single SCI tree, assuming the data set 
+        Fits a single SCITree, assuming the data set 
         was already defined in the SCI forest object.
         """
         if self.X is None:
@@ -240,7 +240,7 @@ class SCIForest:
 
     def fit(self, X: np.ndarray) -> None:
         """
-        Fits an ensemble of SCI trees for the given data.
+        Fits an ensemble of SCITrees for the given data.
 
         Parameters:
         -----------
@@ -258,7 +258,7 @@ class SCIForest:
     
     def path_length(self, x: np.ndarray, sci_tree: SCITree) -> float:
         """
-        Computes the path length for a given sample in the given SCI tree.
+        Computes the path length for a given sample in the given SCITree.
 
         The path value starts from 0. After each movement
         from a node to another, the path is incremented
@@ -293,7 +293,7 @@ class SCIForest:
     def avg_path_length(self, x: np.ndarray) -> float:
         """
         Computes the average path length for a single sample
-        among all trained SCI trees.
+        among all trained SCITrees.
         """
         path_lengths = np.array([self.path_length(x, sci_tree) for sci_tree in self.sci_trees])
         return np.mean(path_lengths)
@@ -310,3 +310,41 @@ class SCIForest:
         """
         scores = np.array([self.score(x) for x in X])
         return scores
+
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    import time 
+    from pyod.utils.data import generate_data_clusters
+
+    contamination = 0.1
+    X_train, X_test, y_train, y_test = generate_data_clusters(n_train=1000, n_test=200, n_clusters=2, n_features=2, contamination=contamination)
+    
+    sciforest = SCIForest(n_trees=100)
+    start = time.time()
+    sciforest.fit(X_train)
+    end = time.time()
+    print(f"Time: {end - start}s")
+
+    X_train_scores = sciforest.scores(X_train)
+    X_test_scores = sciforest.scores(X_test)
+    
+    threshold = np.quantile(X_train_scores, 1 - contamination)
+    
+    X_train_preds = np.array([int(label) for label in (X_train_scores > threshold)])
+    X_test_preds = np.array([int(label) for label in (X_test_scores > threshold)])
+
+    print(f"Train ACC: {np.mean(X_train_preds == y_train)}")
+    print(f"Test ACC: {np.mean(X_test_preds == y_test)}")
+
+    fig, axs = plt.subplots(1, 2, figsize=(10, 4))
+    axs[0].scatter(X_train[y_train == 0][:, 0], X_train[y_train == 0][:, 1], color="blue", label="normal")
+    axs[0].scatter(X_train[y_train == 1][:, 0], X_train[y_train == 1][:, 1], color="red", label="anomaly")
+    axs[0].set_title("Ground truth for train")
+    axs[0].legend()
+
+    axs[1].scatter(X_train[X_train_preds == 0][:, 0], X_train[X_train_preds == 0][:, 1], color="blue", label="normal")
+    axs[1].scatter(X_train[X_train_preds == 1][:, 0], X_train[X_train_preds == 1][:, 1], color="red", label="anomaly")
+    axs[1].set_title("Predictions for train")
+    axs[1].legend()
+
+    plt.show()
