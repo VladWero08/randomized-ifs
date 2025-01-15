@@ -3,6 +3,7 @@ import numpy as np
 
 from multiprocessing import Pool
 
+
 class ExternalNode:
     def __init__(self, size: int, data):
         self.size = size 
@@ -10,14 +11,10 @@ class ExternalNode:
 
 
 class InternalNode:
-    pass
-
-
-class InternalNode:
     def __init__(
         self, 
-        left: ExternalNode | InternalNode, 
-        right: ExternalNode | InternalNode,
+        left: "ExternalNode | InternalNode", 
+        right: "ExternalNode | InternalNode",
         split_value: float,
         split_coeff: np.ndarray,
         split_attr: np.ndarray,
@@ -143,28 +140,50 @@ class SCITree:
         (index, best_split_value): (int, float)
             The index corresponding to the hyperplane found and its best split value.
         """
-        best_std_gain = 0
+        best_sd_gain = 0
         best_split_value = None
         index = None
 
         for i, Y in enumerate(Ys):
+            Y_std = np.std(Y)
+
             for split_value in Y:
                 Y_left = Y[Y < split_value]
                 Y_right = Y[Y >= split_value]
-                std_gain = self.avg_gain(Y, Y_left, Y_right)
+                sd_gain = self.avg_gain(Y_left, Y_right, Y_std)
 
-                if std_gain > best_std_gain:
-                    best_std_gain = std_gain
+                if sd_gain > best_sd_gain:
+                    best_sd_gain = sd_gain
                     best_split_value = split_value
                     index = i
 
         return index, best_split_value
 
-    def avg_gain(self, Y: np.ndarray, Y_left: np.ndarray, Y_right: np.ndarray) -> float:
+    def avg_gain(self, Y_left: np.ndarray, Y_right: np.ndarray, Y_std: float) -> float:
         """
         Computes the averaged gain for the given projections and splits.
+
+        Parameters:
+        -----------
+        Y_left: np.ndarray
+            Left values from the original projections, smaller then the split value.
+        Y_right: np.ndarray
+            Right values from the original projections, higher then the split value.
+        Y_std: float
+            Original standard deviation of the projections.
         """
-        return (np.std(Y) - (np.std(Y_left) + np.std(Y_right)) / 2) / np.std(Y)
+        Y_left_std = 0
+        Y_right_std = 0
+
+        # only compute the standard deviation if the split
+        # resulted in non-empty arrays
+        if len(Y_left) > 0:
+            Y_left_std = np.std(Y_left)
+
+        if len(Y_right) > 0:
+            Y_right_std = np.std(Y_right)
+
+        return (Y_std - (Y_left_std + Y_right_std) / 2) / Y_std
 
 
 class SCIForest:
@@ -194,9 +213,12 @@ class SCIForest:
             The number of instances for each the unsuccessful 
             search for a BST is computed on. 
         """        
-        if size >= 2:
+        if size > 2:
             H = np.log(size) + 0.5772156649
             return 2 * H * (size - 1) - 2 * (size - 1) / size
+
+        if size == 2:
+            return 1
 
         return 0.0
 

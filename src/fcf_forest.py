@@ -3,6 +3,7 @@ import numpy as np
 
 from multiprocessing import Pool
 
+
 class ExternalNode:
     def __init__(self, size: int, data):
         self.size = size
@@ -10,14 +11,10 @@ class ExternalNode:
 
 
 class InternalNode:
-    pass
-
-
-class InternalNode:
     def __init__(
         self,
-        left: ExternalNode | InternalNode,
-        right: ExternalNode | InternalNode,
+        left: "ExternalNode | InternalNode",
+        right: "ExternalNode | InternalNode",
         split_value: np.ndarray,
         split_coeff: np.ndarray,
         split_attr: np.ndarray,
@@ -150,10 +147,12 @@ class FCFTree:
         index = None
 
         for i, Y in enumerate(Ys):
+            Y_std = np.std(Y)
+
             for split_value in Y:
                 Y_left = Y[Y < split_value]
                 Y_right = Y[Y >= split_value]
-                pool_gain = self.pool_gain(Y, Y_left, Y_right)
+                pool_gain = self.pool_gain(Y_left, Y_right, Y_std)
 
                 if pool_gain > best_pool_gain:
                     best_pool_gain = pool_gain
@@ -162,14 +161,33 @@ class FCFTree:
 
         return index, best_split_value
 
-    def pool_gain(self, Y: np.ndarray, Y_left: np.ndarray, Y_right: np.ndarray) -> float:
+    def pool_gain(self, Y_left: np.ndarray, Y_right: np.ndarray, Y_std: float) -> float:
         """
         Computes the averaged gain for the given projections and splits.
+
+        Parameters:
+        -----------
+        Y_left: np.ndarray
+            Left values from the original projections, smaller then the split value.
+        Y_right: np.ndarray
+            Right values from the original projections, higher then the split value.
+        Y_std: float
+            Original standard deviation of the projections.
         """
+        Y_left_std = 0
+        Y_right_std = 0
         n_samples_left = Y_left.shape[0]
         n_samples_right = Y_right.shape[0]
 
-        return (np.std(Y) - (n_samples_left * np.std(Y_left) + n_samples_right * np.std(Y_right)) / (n_samples_left + n_samples_right)) / np.std(Y)
+        # only compute the standard deviation if the split
+        # resulted in non-empty arrays
+        if len(Y_left) > 0:
+            Y_left_std = np.std(Y_left)
+
+        if len(Y_right) > 0:
+            Y_right_std = np.std(Y_right)
+
+        return (Y_std - (n_samples_left * Y_left_std + n_samples_right * Y_right_std) / (n_samples_left + n_samples_right)) / Y_std
     
 
 class FCFForest:
@@ -199,9 +217,12 @@ class FCFForest:
             The number of instances for each the unsuccessful 
             search for a BST is computed on. 
         """        
-        if size >= 2:
+        if size > 2:
             H = np.log(size) + 0.5772156649
             return 2 * H * (size - 1) - 2 * (size - 1) / size
+
+        if size == 2:
+            return 1
 
         return 0.0
     

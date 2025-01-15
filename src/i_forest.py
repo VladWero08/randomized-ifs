@@ -10,14 +10,10 @@ class ExternalNode:
 
 
 class InternalNode:
-    pass
-
-
-class InternalNode:
     def __init__(
         self, 
-        left: ExternalNode | InternalNode, 
-        right: ExternalNode | InternalNode,
+        left: "ExternalNode | InternalNode", 
+        right: "ExternalNode | InternalNode",
         split_attribute: int,
         split_value: int | float
     ):
@@ -92,9 +88,12 @@ class IForest:
             The number of instances for each the unsuccessful 
             search for a BST is computed on. 
         """        
-        if size >= 2:
+        if size > 2:
             H = np.log(size) + 0.5772156649
             return 2 * H * (size - 1) - 2 * (size - 1) / size
+
+        if size == 2:
+            return 1
 
         return 0.0
 
