@@ -31,20 +31,36 @@ class InternalNode:
         self.split_attr_stds = split_attr_stds
 
 
-class FCFTree:
+class FCTree:
     def __init__(
         self,
         height: int, 
         height_limit: int,
+        criterion: float = "height",
+        min_gain: float = 0.5,
         n_attributes: int = 2,
         n_hyperplanes: int = 5,
     ) -> None:
+        if criterion != "height" and criterion != "gain":
+            raise "Criterion needs to be either 'height' or 'gain'!"
+        
+        if not (0 < min_gain < 1):
+            raise "Min gain needs to be inside the interval (0, 1)!"
+
         self.height = height
         self.height_limit = height_limit
+        self.criterion = criterion
+        self.min_gain = min_gain
         self.n_attributes = n_attributes
         self.n_hyperplanes = n_hyperplanes
     
     def fit(self, X: np.ndarray) -> InternalNode | ExternalNode:
+        if self.criterion == "height":
+            return self.fit_with_height(X)
+        else:
+            return self.fit_with_gain(X)
+
+    def fit_with_height(self, X: np.ndarray) -> InternalNode | ExternalNode:
         if self.height >= self.height_limit or X.shape[0] == 1:
             self.root = ExternalNode(size=X.shape[0], data=X)
             return self.root
@@ -58,7 +74,7 @@ class FCFTree:
 
         # compute the projections onto the hyperplanes, and select the best one
         Ys = np.array([self.hyperplane_projection(X, coeffs[i], attrs[i]) for i in range(self.n_hyperplanes)])        
-        Y_best_idx, Y_best_split_value = self.hyperplane_select(Ys)
+        Y_best_idx, Y_best_split_value, _ = self.hyperplane_select(Ys)
         Y = Ys[Y_best_idx]
 
         # compute the expectance and standard deviation 
@@ -70,8 +86,54 @@ class FCFTree:
         X_right = X[Y >= Y_best_split_value]
 
         # compute the left and right side of the tree
-        node_left = FCFTree(self.height + 1, self.height_limit).fit(X_left)
-        node_right = FCFTree(self.height + 1, self.height_limit).fit(X_right)
+        node_left = FCTree(self.height + 1, self.height_limit).fit(X_left)
+        node_right = FCTree(self.height + 1, self.height_limit).fit(X_right)
+
+        self.root = InternalNode(
+            node_left, 
+            node_right, 
+            Y_best_split_value, 
+            coeffs[Y_best_idx], 
+            attrs[Y_best_idx], 
+            attrs_means, 
+            attrs_stds
+        )
+        return self.root
+    
+    def fit_with_gain(self, X: np.ndarray) -> InternalNode | ExternalNode:
+        if X.shape[0] == 1:
+            self.root = ExternalNode(size=X.shape[0], data=X)
+            return self.root
+        
+        # randomly select coefficients and attributes for the hyperplanes
+        coeffs = np.random.normal(loc=0, scale=1, size=(self.n_hyperplanes, self.n_attributes))
+        attrs = np.array([
+            np.random.choice(range(0, X.shape[1]), size=(self.n_attributes), replace=False) 
+            for _ in range(self.n_hyperplanes)
+        ])
+
+        # compute the projections onto the hyperplanes, and select the best one
+        Ys = np.array([self.hyperplane_projection(X, coeffs[i], attrs[i]) for i in range(self.n_hyperplanes)])        
+        Y_best_idx, Y_best_split_value, Y_best_gain = self.hyperplane_select(Ys)
+
+        # if the gain obtained is smaller then the minimum gain allowed,
+        # stop and mark the current node as external node
+        if Y_best_gain < self.min_gain:
+            self.root = ExternalNode(size=X.shape[0], data=X)
+            return self.root
+
+        # compute the expectance and standard deviation 
+        # for the attributes that correspond to the best hyperplane
+        Y = Ys[Y_best_idx]
+        attrs_stds = np.std(X[:, attrs[Y_best_idx]], axis=0)
+        attrs_means = np.mean(X[:, attrs[Y_best_idx]], axis=0)
+
+        X_left = X[Y < Y_best_split_value]
+        X_right = X[Y >= Y_best_split_value]
+
+        # compute the left and right side of the tree
+        node_left = FCTree(self.height + 1, self.height_limit).fit(X_left)
+        node_right = FCTree(self.height + 1, self.height_limit).fit(X_right)
 
         self.root = InternalNode(
             node_left, 
@@ -94,12 +156,10 @@ class FCFTree:
         Projects the given dataset using the coefficients 
         and the attributes given.
         """
-        projection = np.zeros(X.shape[0])
-    
-        for i in range(self.n_attributes):
-            projection = projection + coefficients[i] * (X[:, attributes[i]] - np.mean(X[:, attributes[i]])) / np.std(X[:, attributes[i]])
-
-        return projection
+        return np.sum(
+            coefficients * (X[:, attributes] - np.mean(X[:, attributes], axis=0)) / np.std(X[:, attributes], axis=0),
+            axis=1
+        )
 
     def hyperplane_projection_from_node(
         self, 
@@ -120,12 +180,7 @@ class FCFTree:
         node: InternalNode
             Current node where the sample is positioned in the SCITree.
         """
-        projection = 0
-
-        for i in range(self.n_attributes):
-            projection = projection + node.split_coeff[i] * (x[node.split_attr[i]] - node.split_attr_means[i]) / node.split_attr_stds[i]
-
-        return projection
+        return np.sum(node.split_coeff * ((x[node.split_attr] - node.split_attr_means) / node.split_attr_stds))
     
     def hyperplane_select(self, Ys: np.ndarray) -> t.Tuple[int, float]:
         """
@@ -160,7 +215,7 @@ class FCFTree:
                     best_split_value = split_value
                     index = i
 
-        return index, best_split_value
+        return index, best_split_value, best_pool_gain
 
     def pool_gain(self, Y_left: np.ndarray, Y_right: np.ndarray, Y_std: float) -> float:
         """
@@ -191,25 +246,37 @@ class FCFTree:
         return (Y_std - (n_samples_left * Y_left_std + n_samples_right * Y_right_std) / (n_samples_left + n_samples_right)) / Y_std
     
 
-class FCFForest:
+class FCForest:
     def __init__(
         self,
         n_trees: int = 100,
         sub_sample_size: int = 256,
+        criterion: str = "height",
         height_limit: t.Optional[int] = None,
+        min_gain: float = 0.5,
         n_processes: int = 8
     ):
+        if criterion != "height" and criterion != "gain":
+            raise "Criterion needs to be either 'height' or 'gain'!"
+        
+        if not (0 < min_gain < 1):
+            raise "Min gain needs to be inside the interval (0, 1)!"
+
+        # initialize parameters passed in the constructor
         self.n_trees = n_trees
         self.sub_sample_size = sub_sample_size
         self.n_processes: int = n_processes if n_processes else multiprocessing.cpu_count()
+        self.criterion: str = criterion
         self.height_limit: int = height_limit if height_limit else np.ceil(np.log2(self.sub_sample_size))
-    
+        self.min_gain: float = min_gain
+
+        # initialize parameters used for fitting
         self.expected_depth: float = self.c(sub_sample_size)
-        self.fcf_trees: t.List[FCFTree] = []
+        self.fcf_trees: t.List[FCTree] = []
 
     def c(self, size: int) -> float:
         """
-        Sets the expected depth of a FCFTree 
+        Sets the expected depth of a FCTree 
         based on the number of sub-samples.
 
         Parameters:
@@ -227,9 +294,9 @@ class FCFForest:
 
         return 0.0
     
-    def fit_fcf_tree(self, _) -> t.Optional[FCFTree]:
+    def fit_fcf_tree(self, _) -> t.Optional[FCTree]:
         """
-        Fits a single FCFTree, assuming the data set 
+        Fits a single FCTree, assuming the data set 
         was already defined in the FCF forest object.
         """
         if self.X is None:
@@ -238,14 +305,19 @@ class FCFForest:
         indexes = np.random.choice(range(0, self.X.shape[0]), size=self.sub_sample_size, replace=False)
         X_sub = self.X[indexes]
 
-        fcf_tree = FCFTree(height=0, height_limit=self.height_limit)
+        fcf_tree = FCTree(
+            criterion=self.criterion, 
+            height=0, 
+            height_limit=self.height_limit,
+            min_gain=self.min_gain,
+        )
         fcf_tree.fit(X_sub)
 
         return fcf_tree
 
     def fit(self, X: np.ndarray):
         """
-        Fits an ensemble of FCFTrees for the given data.
+        Fits an ensemble of FCTrees for the given data.
 
         Parameters:
         -----------
@@ -261,10 +333,9 @@ class FCFForest:
         
         self.fcf_trees = fcf_trees 
 
-
-    def path_length(self, x: np.ndarray, fcf_tree: FCFTree) -> float:
+    def path_length(self, x: np.ndarray, fcf_tree: FCTree) -> float:
         """
-        Computes the path length for a given sample in the given FCFTree.
+        Computes the path length for a given sample in the given FCTree.
 
         The path value starts from 0. After each movement
         from a node to another, the path is incremented.
@@ -291,7 +362,7 @@ class FCFForest:
     def avg_path_length(self, x: np.ndarray) -> float:
         """
         Computes the average path length for a single sample
-        among all trained FCFTrees.
+        among all trained FCTrees.
         """
         path_lengths = np.array([self.path_length(x, sci_tree) for sci_tree in self.fcf_trees])
         return np.mean(path_lengths)
