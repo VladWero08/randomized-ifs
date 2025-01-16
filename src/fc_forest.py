@@ -178,7 +178,7 @@ class FCTree:
         x: np.ndarray
             Single sample.
         node: InternalNode
-            Current node where the sample is positioned in the SCITree.
+            Current node where the sample is positioned in the FCTree.
         """
         return np.sum(node.split_coeff * ((x[node.split_attr] - node.split_attr_means) / node.split_attr_stds))
     
@@ -198,52 +198,75 @@ class FCTree:
         (index, best_split_value): (int, float)
             The index corresponding to the hyperplane found and its best split value.
         """
-        best_pool_gain = 0
+        best_pool_gain = float('-inf')
         best_split_value = None
         index = None
 
         for i, Y in enumerate(Ys):
+            # sort the possible split values
+            Y_sorted = np.sort(Y)   
             Y_std = np.std(Y)
+            n = len(Y)
 
-            for split_value in Y:
-                Y_left = Y[Y < split_value]
-                Y_right = Y[Y >= split_value]
-                pool_gain = self.pool_gain(Y_left, Y_right, Y_std)
+            # precompute cumulative sums for left and right sides
+            Y_cumulative_sum = np.cumsum(Y_sorted)
+            # total sum of the projections
+            total_sum = Y_cumulative_sum[-1]
+
+            for j in range(1, n): 
+                Y_left_size = j
+                Y_right_size = n - j
+
+                if Y_left_size == 0 or Y_right_size == 0:
+                    continue
+                
+                # compute means based on the cumulative sums
+                left_mean = Y_cumulative_sum[j - 1] / Y_left_size
+                right_mean = (total_sum - Y_cumulative_sum[j - 1]) / Y_right_size
+
+                # compute standard deviations
+                Y_left_std = np.sqrt(np.sum((Y_sorted[:j] - left_mean) ** 2) / Y_left_size)
+                Y_right_std = np.sqrt(np.sum((Y_sorted[j:] - right_mean) ** 2) / Y_right_size)
+
+                # compute pooled gain
+                pool_gain = self.pool_gain(n, Y_std, Y_left_size, Y_left_std, Y_right_std, Y_right_size)
 
                 if pool_gain > best_pool_gain:
                     best_pool_gain = pool_gain
-                    best_split_value = split_value
+                    best_split_value = Y_sorted[j]
                     index = i
 
         return index, best_split_value, best_pool_gain
 
-    def pool_gain(self, Y_left: np.ndarray, Y_right: np.ndarray, Y_std: float) -> float:
+    def pool_gain(
+        self, 
+        Y_size: float,
+        Y_std: float, 
+        Y_left_size: float,
+        Y_left_std: float, 
+        Y_right_size: float,
+        Y_right_std: float, 
+    
+    ) -> float:
         """
         Computes the averaged gain for the given projections and splits.
 
         Parameters:
         -----------
-        Y_left: np.ndarray
-            Left values from the original projections, smaller then the split value.
-        Y_right: np.ndarray
-            Right values from the original projections, higher then the split value.
+        Y_size: float
+            Original size of the projections.
         Y_std: float
             Original standard deviation of the projections.
+        Y_left_size: float
+            Original size of the projections smaller then the split value.
+        Y_left_std: float
+            Left values from the original projections, smaller then the split value.
+        Y_right_size: float
+            Original size of the projections higher then the split value.
+        Y_right_std: float
+            Right values from the original projections, higher then the split value.
         """
-        Y_left_std = 0
-        Y_right_std = 0
-        n_samples_left = Y_left.shape[0]
-        n_samples_right = Y_right.shape[0]
-
-        # only compute the standard deviation if the split
-        # resulted in non-empty arrays
-        if len(Y_left) > 0:
-            Y_left_std = np.std(Y_left)
-
-        if len(Y_right) > 0:
-            Y_right_std = np.std(Y_right)
-
-        return (Y_std - (n_samples_left * Y_left_std + n_samples_right * Y_right_std) / (n_samples_left + n_samples_right)) / Y_std
+        return (Y_std - (Y_left_size * Y_left_std + Y_right_size * Y_right_std) / Y_size) / Y_std
     
 
 class FCForest:
@@ -294,7 +317,7 @@ class FCForest:
 
         return 0.0
     
-    def fit_fcf_tree(self, _) -> t.Optional[FCTree]:
+    def fit_fc_tree(self, _) -> t.Optional[FCTree]:
         """
         Fits a single FCTree, assuming the data set 
         was already defined in the FCF forest object.
@@ -328,8 +351,8 @@ class FCForest:
 
         # use a pool to compute the trees in parallel
         with multiprocessing.Pool(processes=self.n_processes) as pool:
-            # assign the scitree training to the pool
-            fcf_trees = pool.map(self.fit_fcf_tree, range(self.n_trees))
+            # assign the fctree training to the pool
+            fcf_trees = pool.map(self.fit_fc_tree, range(self.n_trees))
         
         self.fcf_trees = fcf_trees 
 
@@ -364,7 +387,7 @@ class FCForest:
         Computes the average path length for a single sample
         among all trained FCTrees.
         """
-        path_lengths = np.array([self.path_length(x, sci_tree) for sci_tree in self.fcf_trees])
+        path_lengths = np.array([self.path_length(x, fcf_tree) for fcf_tree in self.fcf_trees])
         return np.mean(path_lengths)
 
     def score(self, x: np.ndarray) -> float:
@@ -377,7 +400,10 @@ class FCForest:
         """
         Computes the score for a dataset with multiple samples.
         """
-        return np.array([self.score(x) for x in X])
+        with multiprocessing.Pool(processes=self.n_processes) as pool:
+            scores = pool.map(self.score, X)
+        
+        return np.array(scores)
     
     def decision_area(self) -> t.Optional[matplotlib.figure.Figure]:
         """
@@ -399,7 +425,7 @@ class FCForest:
         scores = scores.reshape(xx.shape)
 
         fig, ax = plt.subplots(figsize=(10, 8))
-        contour = ax.contourf(xx, yy, scores, levels=30, cmap="coolwarm")
+        contour = ax.contourf(xx, yy, scores, levels=15, cmap="coolwarm")
         cbar = fig.colorbar(contour, ax=ax)
         ax.set_title("FCF")
 
