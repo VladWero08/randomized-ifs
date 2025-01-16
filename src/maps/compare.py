@@ -49,6 +49,9 @@ def compare_methods(
     save: bool = False
         Whether to save each decision area as a PNG file.
     """
+    if X_train.shape[1] != 2:
+        raise Exception("Training data must be 2D to compare decision areas!")
+    
     i_forest = IForest()
     i_forest.fit(X_train)
     i_forest_fig = i_forest.decision_area()

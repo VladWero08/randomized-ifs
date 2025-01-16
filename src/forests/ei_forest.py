@@ -34,7 +34,7 @@ class EITree:
     ):
         self.height = height
         self.height_limit = height_limit
-        self.extension_level = extension_level
+        self.extension_level: int = extension_level
         self.root: InternalNode | ExternalNode = None
 
     def fit(self, X: np.ndarray) -> InternalNode | ExternalNode:
@@ -51,9 +51,9 @@ class EITree:
             return self.root
         
         # randomly choose the split slope
-        # idxs = np.random.choice(range(X.shape[1]), X.shape[1] - self.extension_level, replace=False)
+        idxs = np.random.choice(range(X.shape[1]), self.extension_level, replace=False)
         split_slope = np.random.normal(loc=0.0, scale=1.0, size=X.shape[1])
-        # split_slope[idxs] = 0
+        split_slope[idxs] = 0
         # randomly choose the split intercept
         split_intercept = np.random.uniform(X.min(axis=0), X.max(axis=0))
         # compute the branching criteria

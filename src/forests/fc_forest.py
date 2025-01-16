@@ -42,10 +42,10 @@ class FCTree:
         n_hyperplanes: int = 5,
     ) -> None:
         if criterion != "height" and criterion != "gain":
-            raise "Criterion needs to be either 'height' or 'gain'!"
+            raise Exception("Criterion needs to be either 'height' or 'gain'!")
         
         if not (0 < min_gain < 1):
-            raise "Min gain needs to be inside the interval (0, 1)!"
+            raise Exception("Min gain needs to be inside the interval (0, 1)!")
 
         self.height = height
         self.height_limit = height_limit
@@ -282,10 +282,10 @@ class FCForest:
         n_processes: int = 8
     ):
         if criterion != "height" and criterion != "gain":
-            raise "Criterion needs to be either 'height' or 'gain'!"
+            raise Exception("Criterion needs to be either 'height' or 'gain'!")
         
         if not (0 < min_gain < 1):
-            raise "Min gain needs to be inside the interval (0, 1)!"
+            raise Exception("Min gain needs to be inside the interval (0, 1)!")
 
         # initialize parameters passed in the constructor
         self.n_trees = n_trees
