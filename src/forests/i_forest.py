@@ -1,14 +1,12 @@
 import typing as t
 import numpy as np
+import multiprocessing
 import matplotlib.pyplot as plt
 import matplotlib.figure
-import multiprocessing
-
 
 class ExternalNode:
-    def __init__(self, size: int, data):
+    def __init__(self, size: int):
         self.size = size 
-        self.data = data
 
 
 class InternalNode:
@@ -16,30 +14,24 @@ class InternalNode:
         self, 
         left: "ExternalNode | InternalNode", 
         right: "ExternalNode | InternalNode",
-        split_slope: np.ndarray,
-        split_intercept: np.ndarray,
+        split_attribute: int,
+        split_value: int | float
     ):
         self.left = left
         self.right = right
-        self.split_slope = split_slope
-        self.split_intercept = split_intercept
+        self.split_attribute = split_attribute
+        self.split_value = split_value
 
 
-class EITree:
-    def __init__(
-        self, 
-        height: int, 
-        height_limit: int,
-        extension_level: int = 0,    
-    ):
+class ITree:
+    def __init__(self, height: int, height_limit: int):
         self.height = height
         self.height_limit = height_limit
-        self.extension_level = extension_level
         self.root: InternalNode | ExternalNode = None
 
     def fit(self, X: np.ndarray) -> InternalNode | ExternalNode:
         """
-        Fits a extended isolation tree for the given data.
+        Fits a isolation tree for the given data.
 
         Parameters:
         -----------
@@ -47,31 +39,29 @@ class EITree:
             Data that needs to be fit.
         """
         if self.height >= self.height_limit or X.shape[0] <= 1:
-            self.root = ExternalNode(size=X.shape[0], data=X)
+            self.root = ExternalNode(size=X.shape[0])
             return self.root
         
-        # randomly choose the split slope
-        idxs = np.random.choice(range(X.shape[1]), X.shape[1] - self.extension_level - 1, replace=False)
-        split_slope = np.random.normal(loc=0, scale=1, size=X.shape[1])
-        split_slope[idxs] = 0
-        # randomly choose the split intercept
-        split_intercept = np.random.uniform(X.min(axis=0), X.max(axis=0))
-        # compute the branching criteria
-        split_criteria = np.dot(X - split_intercept, split_slope)
+        # randomly choose the split variable
+        split_attribute = np.random.randint(0, X.shape[1])
+
+        # randomly choose the split value
+        split_value_min, split_value_max = np.min(X[:, split_attribute]), np.max(X[:, split_attribute]) 
+        split_value = np.random.uniform(split_value_min, split_value_max)
 
         # compute the split of the data
-        X_left = X[split_criteria < 0] 
-        X_right = X[split_criteria >= 0]
+        X_left = X[X[:, split_attribute] < split_value] 
+        X_right = X[X[:, split_attribute] >= split_value]
 
         # compute the left and right side of the tree
-        node_left = EITree(self.height + 1, self.height_limit).fit(X_left)
-        node_right = EITree(self.height + 1, self.height_limit).fit(X_right)
+        node_left = ITree(self.height + 1, self.height_limit).fit(X_left)
+        node_right = ITree(self.height + 1, self.height_limit).fit(X_right)
 
-        self.root = InternalNode(node_left, node_right, split_slope, split_intercept, self.extension_level)
+        self.root = InternalNode(node_left, node_right, split_attribute, split_value)
         return self.root
 
 
-class EIForest:
+class IForest:
     def __init__(
         self, 
         n_trees: int = 100, 
@@ -81,11 +71,11 @@ class EIForest:
     ):
         self.n_trees = n_trees
         self.sub_sample_size = sub_sample_size
-        self.n_processes: int = n_processes if n_processes else multiprocessing.cpu_count()
+        self.n_processes = n_processes if n_processes else multiprocessing.cpu_count()
         self.height_limit: int = height_limit if height_limit else np.ceil(np.log2(self.sub_sample_size))
         
         self.expected_depth: float = self.c(sub_sample_size)
-        self.ei_trees: t.List[EITree] = []
+        self.itrees: t.List[ITree] = []
 
     def c(self, size: int) -> float:
         """
@@ -107,10 +97,10 @@ class EIForest:
 
         return 0.0
 
-    def fit_ei_tree(self, _) -> t.Optional[EITree]:
+    def fit_itree(self, _) -> t.Optional[ITree]:
         """
-        Fits a single EITree, assuming the data set 
-        was already defined in the EIForest object.
+        Fits a single ITree, assuming the data set 
+        was already defined in the IForest object.
         """
         if self.X is None:
             return
@@ -118,10 +108,10 @@ class EIForest:
         indexes = np.random.choice(range(0, self.X.shape[0]), size=self.sub_sample_size, replace=False)
         X_sub = self.X[indexes]
 
-        ei_tree = EITree(height=0, height_limit=self.height_limit)
-        ei_tree.fit(X_sub)
+        itree = ITree(height=0, height_limit=self.height_limit)
+        itree.fit(X_sub)
 
-        return ei_tree
+        return itree
 
     def fit(self, X: np.ndarray) -> None:
         """
@@ -136,12 +126,12 @@ class EIForest:
 
         # use a pool to compute the trees in parallel
         with multiprocessing.Pool(processes=self.n_processes) as pool:
-            # assign the EITree training to the pool
-            ei_trees = pool.map(self.fit_ei_tree, range(self.n_trees))
+            # assign the scitree training to the pool
+            itrees = pool.map(self.fit_itree, range(self.n_trees))
         
-        self.ei_trees = ei_trees 
+        self.itrees = itrees 
 
-    def path_length(self, x: np.ndarray, ei_tree: EITree) -> float:
+    def path_length(self, x: np.ndarray, itree: ITree) -> float:
         """
         Computes the path length for a given sample in the given ITree.
 
@@ -152,13 +142,13 @@ class EIForest:
         calculated until that point is returned plus an adjustment
         for the subtree that was not continued beyond the height limit.
         """
-        node = ei_tree.root
+        node = itree.root
         path = 0
 
         while not isinstance(node, ExternalNode):
-            y = np.inner(x - node.split_intercept, node.split_slope)
+            y = x[node.split_attribute]
 
-            if y < 0:
+            if y < node.split_value:
                 node = node.left
             else:
                 node = node.right
@@ -172,14 +162,14 @@ class EIForest:
         Computes the average path length for a single sample
         among all trained isolation trees.
         """
-        path_lengths = np.array([self.path_length(x, ei_tree) for ei_tree in self.ei_trees])
+        path_lengths = np.array([self.path_length(x, itree) for itree in self.itrees])
         return np.mean(path_lengths)    
     
     def score(self, x: np.ndarray) -> float:
         """
         Computes the score for a single sample.
         """
-        return np.power(2, -1 * self.avg_path_length(x) / self.expected_depth)
+        return np.power(2, -self.avg_path_length(x) / self.expected_depth)
 
     def scores(self, X: np.ndarray) -> np.ndarray:
         """
@@ -187,7 +177,7 @@ class EIForest:
         """
         scores = np.array([self.score(x) for x in X])
         return scores
-
+    
     def decision_area(self) -> t.Optional[matplotlib.figure.Figure]:
         """
         Computes the decision area for the fitted data,
@@ -208,8 +198,7 @@ class EIForest:
         scores = scores.reshape(xx.shape)
 
         fig, ax = plt.subplots(figsize=(10, 8))
-        contour = ax.contourf(xx, yy, scores, levels=30, cmap="coolwarm")
-        cbar = fig.colorbar(contour, ax=ax)
-        ax.set_title("EIF")
+        ax.contourf(xx, yy, scores, levels=15, cmap="coolwarm")
+        ax.set_title("IF")
 
         return fig

@@ -344,8 +344,7 @@ class SCIForest:
         scores = scores.reshape(xx.shape)
 
         fig, ax = plt.subplots(figsize=(10, 8))
-        contour = ax.contourf(xx, yy, scores, levels=30, cmap="coolwarm")
-        cbar = fig.colorbar(contour, ax=ax)
+        ax.contourf(xx, yy, scores, levels=15, cmap="coolwarm")
         ax.set_title("SCIF")
 
         return fig
