@@ -198,7 +198,7 @@ class FCTree:
         (index, best_split_value): (int, float)
             The index corresponding to the hyperplane found and its best split value.
         """
-        best_pool_gain = float('-inf')
+        best_pool_gain = 0
         best_split_value = None
         index = None
 
@@ -206,30 +206,30 @@ class FCTree:
             # sort the possible split values
             Y_sorted = np.sort(Y)   
             Y_std = np.std(Y)
-            n = len(Y)
+            Y_size = len(Y)
 
             # precompute cumulative sums for left and right sides
             Y_cumulative_sum = np.cumsum(Y_sorted)
             # total sum of the projections
             total_sum = Y_cumulative_sum[-1]
 
-            for j in range(1, n): 
+            for j in range(1, Y_size): 
                 Y_left_size = j
-                Y_right_size = n - j
+                Y_right_size = Y_size - j
 
                 if Y_left_size == 0 or Y_right_size == 0:
                     continue
                 
                 # compute means based on the cumulative sums
-                left_mean = Y_cumulative_sum[j - 1] / Y_left_size
-                right_mean = (total_sum - Y_cumulative_sum[j - 1]) / Y_right_size
+                Y_left_mean = Y_cumulative_sum[j - 1] / Y_left_size
+                Y_right_mean = (total_sum - Y_cumulative_sum[j - 1]) / Y_right_size
 
                 # compute standard deviations
-                Y_left_std = np.sqrt(np.sum((Y_sorted[:j] - left_mean) ** 2) / Y_left_size)
-                Y_right_std = np.sqrt(np.sum((Y_sorted[j:] - right_mean) ** 2) / Y_right_size)
+                Y_left_std = np.sqrt(np.sum((Y_sorted[:j] - Y_left_mean) ** 2) / Y_left_size)
+                Y_right_std = np.sqrt(np.sum((Y_sorted[j:] - Y_right_mean) ** 2) / Y_right_size)
 
                 # compute pooled gain
-                pool_gain = self.pool_gain(n, Y_std, Y_left_size, Y_left_std, Y_right_std, Y_right_size)
+                pool_gain = self.pool_gain(Y_size, Y_std, Y_left_size, Y_left_std, Y_right_std, Y_right_size)
 
                 if pool_gain > best_pool_gain:
                     best_pool_gain = pool_gain
@@ -260,11 +260,13 @@ class FCTree:
         Y_left_size: float
             Original size of the projections smaller then the split value.
         Y_left_std: float
-            Left values from the original projections, smaller then the split value.
+            Standard deviation of the left values from the original projections, 
+            smaller then the split value.
         Y_right_size: float
             Original size of the projections higher then the split value.
         Y_right_std: float
-            Right values from the original projections, higher then the split value.
+            Standard deviation of the right values from the original projections, 
+            higher then the split value.
         """
         return (Y_std - (Y_left_size * Y_left_std + Y_right_size * Y_right_std) / Y_size) / Y_std
     
@@ -349,9 +351,7 @@ class FCForest:
         """
         self.X = X
 
-        # use a pool to compute the trees in parallel
         with multiprocessing.Pool(processes=self.n_processes) as pool:
-            # assign the fctree training to the pool
             fcf_trees = pool.map(self.fit_fc_tree, range(self.n_trees))
         
         self.fcf_trees = fcf_trees 

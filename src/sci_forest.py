@@ -146,44 +146,56 @@ class SCITree:
         index = None
 
         for i, Y in enumerate(Ys):
+            # sort the possible split values
+            Y_sorted = np.sort(Y)
             Y_std = np.std(Y)
+            Y_size = len(Y)
 
-            for split_value in Y:
-                Y_left = Y[Y < split_value]
-                Y_right = Y[Y >= split_value]
-                sd_gain = self.avg_gain(Y_left, Y_right, Y_std)
+            # precompute cumulative sums for left and right sides
+            Y_cumulative_sum = np.cumsum(Y_sorted)
+            # total sum of the projections
+            total_sum = Y_cumulative_sum[-1]
 
-                if sd_gain > best_sd_gain:
-                    best_sd_gain = sd_gain
-                    best_split_value = split_value
+            for j in range(1, Y_size): 
+                Y_left_size = j
+                Y_right_size = Y_size - j
+
+                if Y_left_size == 0 or Y_right_size == 0:
+                    continue
+                
+                # compute means based on the cumulative sums
+                Y_left_mean = Y_cumulative_sum[j - 1] / Y_left_size
+                Y_right_mean = (total_sum - Y_cumulative_sum[j - 1]) / Y_right_size
+
+                # compute standard deviations
+                Y_left_std = np.sqrt(np.sum((Y_sorted[:j] - Y_left_mean) ** 2) / Y_left_size)
+                Y_right_std = np.sqrt(np.sum((Y_sorted[j:] - Y_right_mean) ** 2) / Y_right_size)
+
+                # compute pooled gain
+                pool_gain = self.avg_gain(Y_std, Y_left_std, Y_right_std)
+
+                if pool_gain > best_sd_gain:
+                    best_sd_gain = pool_gain
+                    best_split_value = Y_sorted[j]
                     index = i
 
         return index, best_split_value
 
-    def avg_gain(self, Y_left: np.ndarray, Y_right: np.ndarray, Y_std: float) -> float:
+    def avg_gain(self, Y_std: float, Y_left_std: float, Y_right_std: float) -> float:
         """
         Computes the averaged gain for the given projections and splits.
 
         Parameters:
         -----------
-        Y_left: np.ndarray
-            Left values from the original projections, smaller then the split value.
-        Y_right: np.ndarray
-            Right values from the original projections, higher then the split value.
         Y_std: float
             Original standard deviation of the projections.
+        Y_left_std: float
+            Standard deviation of the left values from the original projections, 
+            smaller then the split value.
+        Y_right_std: float
+            Standard deviation of the right values from the original projections, 
+            higher then the split value.
         """
-        Y_left_std = 0
-        Y_right_std = 0
-
-        # only compute the standard deviation if the split
-        # resulted in non-empty arrays
-        if len(Y_left) > 0:
-            Y_left_std = np.std(Y_left)
-
-        if len(Y_right) > 0:
-            Y_right_std = np.std(Y_right)
-
         return (Y_std - (Y_left_std + Y_right_std) / 2) / Y_std
 
 
@@ -250,9 +262,7 @@ class SCIForest:
         """
         self.X = X
 
-        # use a pool to compute the trees in parallel
         with multiprocessing.Pool(processes=self.n_processes) as pool:
-            # assign the scitree training to the pool
             sci_trees = pool.map(self.fit_sci_tree, range(self.n_trees))
         
         self.sci_trees = sci_trees 
@@ -309,8 +319,10 @@ class SCIForest:
         """
         Computes the score for a dataset with multiple samples.
         """
-        scores = np.array([self.score(x) for x in X])
-        return scores
+        with multiprocessing.Pool(processes=self.n_processes) as pool:
+            scores = pool.map(self.score, X)
+        
+        return np.array(scores)
     
     def decision_area(self) -> t.Optional[matplotlib.figure.Figure]:
         """
@@ -337,3 +349,61 @@ class SCIForest:
         ax.set_title("SCIF")
 
         return fig
+    
+if __name__ == "__main__":
+    import matplotlib.pyplot as plt
+    import time 
+    from pyod.models import iforest
+    from pyod.utils.data import generate_data_clusters
+    from sklearn.datasets import make_blobs
+
+    contamination = 0.1
+    X_train, y_train = make_blobs(n_samples=10000, centers=[(10, 0), (0, 10)], cluster_std=1)
+    X_train, X_test, y_train, y_test = generate_data_clusters(n_train=1000, n_test=200, n_clusters=2, n_features=2, contamination=contamination)
+    
+    # FCTree(0, 1).fit(X_train)
+    # exit(0)
+
+    my_fcforest = SCIForest(n_trees=100)
+    start = time.time()
+    my_fcforest.fit(X_train)
+    end = time.time()
+    print(f"Time to train: {end - start}s")
+    
+    start = time.time()
+    X_train_scores = my_fcforest.scores(X_train)
+    end = time.time()
+    print(f"Time to predict: {end - start}")
+
+    threshold = np.quantile(X_train_scores, 1 - contamination)
+    X_train_preds = np.array([int(label) for label in (X_train_scores > threshold)])
+    print(f"Train FCF with height - ACC: {np.mean(X_train_preds == y_train)}")
+
+    pyod_forest = iforest.IForest(contamination=contamination, max_samples=256)
+    start = time.time()
+    pyod_forest.fit(X_train)
+    end = time.time()
+    print(f"Time to train: {end - start}s")
+    X_train_pyod_preds = pyod_forest.predict(X_train)
+    print(f"Train Pyod IF - ACC: {np.mean(X_train_pyod_preds == y_train)}")
+
+    # fig, axs = plt.subplots(1, 3, figsize=(16, 4))
+    # axs[0].scatter(X_train[y_train == 0][:, 0], X_train[y_train == 0][:, 1], color="blue", label="normal")
+    # axs[0].scatter(X_train[y_train == 1][:, 0], X_train[y_train == 1][:, 1], color="red", label="anomaly")
+    # axs[0].set_title("Ground truth for train")
+    # axs[0].legend()
+
+    # axs[1].scatter(X_train[X_train_preds == 0][:, 0], X_train[X_train_preds == 0][:, 1], color="blue", label="normal")
+    # axs[1].scatter(X_train[X_train_preds == 1][:, 0], X_train[X_train_preds == 1][:, 1], color="red", label="anomaly")
+    # axs[1].set_title("FCF Height")
+    # axs[1].legend()
+
+    # axs[2].scatter(X_train[X_train_pyod_preds == 0][:, 0], X_train[X_train_pyod_preds == 0][:, 1], color="blue", label="normal")
+    # axs[2].scatter(X_train[X_train_pyod_preds == 1][:, 0], X_train[X_train_pyod_preds == 1][:, 1], color="red", label="anomaly")
+    # axs[2].set_title("IF Pyod")
+    # axs[2].legend()
+
+    # plt.show()
+
+    fig = my_fcforest.decision_area()
+    fig.savefig("decision_area.png")
