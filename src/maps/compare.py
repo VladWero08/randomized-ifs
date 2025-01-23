@@ -89,6 +89,6 @@ def compare_methods(
     # save the plots
     if save:
         i_forest_fig.savefig("if_decision_area", format="png", dpi=300)
-        ei_forest_fig.savefig("if_decision_area", format="png", dpi=300)
-        sci_forest_fig.savefig("if_decision_area", format="png", dpi=300)
-        fc_forest_fig.savefig("if_decision_area", format="png", dpi=300)
+        ei_forest_fig.savefig("eif_decision_area", format="png", dpi=300)
+        sci_forest_fig.savefig("sci_decision_area", format="png", dpi=300)
+        fc_forest_fig.savefig("fc_decision_area", format="png", dpi=300)
