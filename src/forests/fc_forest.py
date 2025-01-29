@@ -36,10 +36,10 @@ class FCTree:
         self,
         height: int, 
         height_limit: int,
+        rng: np.random.Generator,
         criterion: float = "normal",
         min_gain: float = 0.5,
         n_attributes: int = 2,
-        n_hyperplanes: int = 1,
     ) -> None:
         if criterion != "normal" and criterion != "gain":
             raise Exception("Criterion needs to be either 'height' or 'gain'!")
@@ -49,10 +49,10 @@ class FCTree:
 
         self.height: int = height
         self.height_limit: int = height_limit
+        self.rng: np.random.Generator = rng
         self.criterion: str = criterion
         self.min_gain: float = min_gain
         self.n_attributes: int = n_attributes
-        self.n_hyperplanes: int = n_hyperplanes
     
     def fit(self, X: np.ndarray) -> InternalNode | ExternalNode:
         if self.criterion == "normal":
@@ -77,8 +77,8 @@ class FCTree:
         attrs_valid_idx = np.where(attrs_valid == True)[0]
 
         # randomly select coefficients and attributes for the hyperplane
-        coeffs = np.random.normal(loc=0, scale=1, size=self.n_attributes)
-        attrs = np.random.choice(attrs_valid_idx, size=self.n_attributes, replace=True) 
+        coeffs = self.rng.normal(loc=0, scale=1, size=self.n_attributes)
+        attrs = self.rng.choice(attrs_valid_idx, size=self.n_attributes, replace=True) 
 
         # compute the projections onto the hyperplane, and select the best one
         Y = self.hyperplane_projection(X, coeffs, attrs)        
@@ -92,8 +92,8 @@ class FCTree:
         X_right = X[Y >= Y_best_split_value]
 
         # compute the left and right side of the tree
-        node_left = FCTree(self.height + 1, self.height_limit).fit(X_left)
-        node_right = FCTree(self.height + 1, self.height_limit).fit(X_right)
+        node_left = FCTree(self.height + 1, self.height_limit, self.rng).fit(X_left)
+        node_right = FCTree(self.height + 1, self.height_limit, self.rng).fit(X_right)
 
         self.root = InternalNode(
             node_left, 
@@ -123,8 +123,8 @@ class FCTree:
         attrs_valid_idx = np.where(attrs_valid == True)[0]
 
         # randomly select coefficients and attributes for the hyperplane
-        coeffs = np.random.normal(loc=0, scale=1, size=self.n_attributes)
-        attrs = np.random.choice(attrs_valid_idx, size=self.n_attributes, replace=True) 
+        coeffs = self.rng.normal(loc=0, scale=1, size=self.n_attributes)
+        attrs = self.rng.choice(attrs_valid_idx, size=self.n_attributes, replace=True) 
 
         # compute the projections onto the hyperplane, and select the best one
         Y = self.hyperplane_projection(X, coeffs, attrs)        
@@ -144,8 +144,8 @@ class FCTree:
         X_right = X[Y >= Y_best_split_value]
 
         # compute the left and right side of the tree
-        node_left = FCTree(self.height + 1, self.height_limit).fit(X_left)
-        node_right = FCTree(self.height + 1, self.height_limit).fit(X_right)
+        node_left = FCTree(self.height + 1, self.height_limit, self.rng).fit(X_left)
+        node_right = FCTree(self.height + 1, self.height_limit, self.rng).fit(X_right)
 
         self.root = InternalNode(
             node_left, 
@@ -291,13 +291,14 @@ class FCForest:
         n_trees: int = 100,
         sub_sample_size: int = 256,
         contamination: float = 0.1,
-        criterion: str = "height",
+        criterion: str = "normal",
         height_limit: t.Optional[int] = None,
         min_gain: float = 0.5,
-        n_processes: int = 8
+        n_processes: int = 8,
+        seed: int = 1,
     ):
-        if criterion != "height" and criterion != "gain":
-            raise Exception("Criterion needs to be either 'height' or 'gain'!")
+        if criterion != "normal" and criterion != "gain":
+            raise Exception("Criterion needs to be either 'normal' or 'gain'!")
         
         if not (0 < min_gain < 1):
             raise Exception("Min gain needs to be inside the interval (0, 1)!")
@@ -317,6 +318,8 @@ class FCForest:
         self.decision_scores: t.List[float] = []
         self.threshold: t.Optional[float] = None
         self.labels: t.List[int] = []
+
+        self.rng: np.random.Generator = np.random.default_rng(seed)
 
     def c(self, size: int) -> float:
         """
@@ -347,13 +350,14 @@ class FCForest:
         if self.X is None:
             return
         
-        indexes = np.random.choice(range(0, self.X.shape[0]), size=self.sub_sample_size, replace=False)
+        indexes = self.rng.choice(range(0, self.X.shape[0]), size=self.sub_sample_size, replace=False)
         X_sub = self.X[indexes]
 
         fcf_tree = FCTree(
             criterion=self.criterion, 
             height=0, 
             height_limit=self.height_limit,
+            rng=self.rng,
             min_gain=self.min_gain,
         )
         fcf_tree.fit(X_sub)

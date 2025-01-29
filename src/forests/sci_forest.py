@@ -36,18 +36,21 @@ class SCITree:
         self, 
         height: int,
         height_limit: int,
+        rng: np.random.Generator,
         n_attributes: int = 2, 
         n_hyperplanes: int = 5
     ) -> None:
         self.height: int = height
         self.height_limit: int = height_limit
+        self.rng: np.random.Generator = rng
         self.n_attributes: int = n_attributes
         self.n_hyperplanes: int = n_hyperplanes
         self.root: InternalNode | ExternalNode = None
 
+
     def fit(self, X: np.ndarray) -> InternalNode | ExternalNode:
         if (
-            # self.height >= self.height_limit or 
+            self.height >= self.height_limit or 
             X.shape[0] <= 2 or
             all(np.std(X, axis=0) <= 1e-10)
         ):
@@ -59,9 +62,9 @@ class SCITree:
         n_attributes_tree = min(len(attrs_valid), self.n_attributes)
 
         # randomly select coefficients and attributes for the hyperplanes
-        coeffs = np.random.uniform(-1, 1, size=(self.n_hyperplanes, n_attributes_tree))
+        coeffs = self.rng.uniform(-1, 1, size=(self.n_hyperplanes, n_attributes_tree))
         attrs = np.array([
-            np.random.choice(attrs_valid, size=(n_attributes_tree), replace=False) 
+            self.rng.choice(attrs_valid, size=(n_attributes_tree), replace=False) 
             for _ in range(self.n_hyperplanes)
         ])
 
@@ -79,8 +82,8 @@ class SCITree:
         limit = max(Y) - min(Y)
 
         # compute the left and right side of the tree
-        node_left = SCITree(self.height + 1, self.height_limit).fit(X_left)
-        node_right = SCITree(self.height + 1, self.height_limit).fit(X_right)
+        node_left = SCITree(self.height + 1, self.height_limit, self.rng).fit(X_left)
+        node_right = SCITree(self.height + 1, self.height_limit, self.rng).fit(X_right)
 
         self.root = InternalNode(
             node_left, 
@@ -212,7 +215,8 @@ class SCIForest:
         sub_sample_size: int = 256, 
         contamination: t.Optional[float] = 0.1,
         height_limit: t.Optional[int] = None,
-        n_processes: int = 8
+        n_processes: int = 8,
+        seed: int = 1,
     ):
         # initialize parameters passed from the constructor
         self.n_trees: int = n_trees
@@ -227,6 +231,8 @@ class SCIForest:
         self.decision_scores: t.List[float] = []
         self.threshold: t.Optional[float] = None
         self.labels: t.List[int] = []
+
+        self.rng = np.random.default_rng(seed)
 
     def c(self, size: int) -> float:
         """
@@ -256,10 +262,14 @@ class SCIForest:
         if self.X is None:
             return
         
-        indexes = np.random.choice(range(0, self.X.shape[0]), size=self.sub_sample_size, replace=False)
+        indexes = self.rng.choice(range(0, self.X.shape[0]), size=self.sub_sample_size, replace=False)
         X_sub = self.X[indexes]
 
-        sci_tree = SCITree(height=0, height_limit=self.height_limit)
+        sci_tree = SCITree(
+            height=0, 
+            height_limit=self.height_limit, 
+            rng=self.rng
+        )
         sci_tree.fit(X_sub)
 
         return sci_tree

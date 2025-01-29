@@ -30,11 +30,13 @@ class EITree:
         self, 
         height: int, 
         height_limit: int,
-        extension_level: int = 2,    
+        extension_level: int,    
+        rng: np.random.Generator,
     ):
         self.height: int = height
         self.height_limit: int = height_limit
         self.extension_level: int = extension_level
+        self.rng: np.random.Generator = rng
         self.root: InternalNode | ExternalNode = None
 
     def fit(self, X: np.ndarray) -> InternalNode | ExternalNode:
@@ -51,11 +53,12 @@ class EITree:
             return self.root
         
         # randomly choose the split slope
-        idxs = np.random.choice(range(X.shape[1]), X.shape[1] - self.extension_level, replace=False)
-        split_slope = np.random.normal(loc=0.0, scale=1.0, size=X.shape[1])
+        idxs = self.rng.choice(range(X.shape[1]), X.shape[1] - self.extension_level, replace=False)
+        split_slope = self.rng.normal(loc=0.0, scale=1.0, size=X.shape[1])
         split_slope[idxs] = 0
+
         # randomly choose the split intercept
-        split_intercept = np.random.uniform(X.min(axis=0), X.max(axis=0))
+        split_intercept = self.rng.uniform(X.min(axis=0), X.max(axis=0))
         split_intercept[idxs] = 0
 
         # compute the branching criteria
@@ -66,8 +69,8 @@ class EITree:
         X_right = X[split_criteria > 0]
 
         # compute the left and right side of the tree
-        node_left = EITree(self.height + 1, self.height_limit).fit(X_left)
-        node_right = EITree(self.height + 1, self.height_limit).fit(X_right)
+        node_left = EITree(self.height + 1, self.height_limit, self.extension_level, self.rng).fit(X_left)
+        node_right = EITree(self.height + 1, self.height_limit, self.extension_level, self.rng).fit(X_right)
 
         self.root = InternalNode(node_left, node_right, split_slope, split_intercept)
         return self.root
@@ -80,13 +83,16 @@ class EIForest:
         sub_sample_size: int = 256, 
         contamination: float = 0.1,
         height_limit: t.Optional[int] = None,
-        n_processes: int = 8
+        extension_level: int = 2,
+        n_processes: int = 8,
+        seed: int = 1,
     ):
         # initialize parameters passed from the constructor
         self.n_trees: int = n_trees
         self.sub_sample_size: int = sub_sample_size
         self.contamination: float = contamination
         self.height_limit: int = height_limit if height_limit else np.ceil(np.log2(self.sub_sample_size))
+        self.extension_level = extension_level
         self.n_processes: int = n_processes if n_processes else multiprocessing.cpu_count()
         
         # initialize parameters used for fitting
@@ -95,6 +101,8 @@ class EIForest:
         self.decision_scores: t.List[float] = []
         self.threshold: t.Optional[float] = None
         self.labels: t.List[int] = []
+
+        self.rng: np.random.Generator = np.random.default_rng(seed)
 
     def c(self, size: int) -> float:
         """
@@ -124,10 +132,15 @@ class EIForest:
         if self.X is None:
             return
         
-        indexes = np.random.choice(range(0, self.X.shape[0]), size=self.sub_sample_size, replace=False)
+        indexes = self.rng.choice(range(0, self.X.shape[0]), size=self.sub_sample_size, replace=False)
         X_sub = self.X[indexes]
 
-        ei_tree = EITree(height=0, height_limit=self.height_limit)
+        ei_tree = EITree(
+            height=0, 
+            height_limit=self.height_limit,
+            extension_level=self.extension_level,
+            rng=self.rng    
+        )
         ei_tree.fit(X_sub)
 
         return ei_tree
@@ -207,15 +220,11 @@ class EIForest:
         return np.mean(path_lengths)    
     
     def score(self, x: np.ndarray) -> float:
-        """
-        Computes the score for a single sample.
-        """
+        """Computes the score for a single sample."""
         return np.power(2, -1 * self.avg_path_length(x) / self.expected_depth)
 
     def scores(self, X: np.ndarray) -> np.ndarray:
-        """
-        Computes the score for all dataset with multiple samples.
-        """
+        """Computes the score for all dataset with multiple samples."""
         scores = np.array([self.score(x) for x in X])
         return scores
 
