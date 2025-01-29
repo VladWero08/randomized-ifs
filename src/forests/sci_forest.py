@@ -39,21 +39,29 @@ class SCITree:
         n_attributes: int = 2, 
         n_hyperplanes: int = 5
     ) -> None:
-        self.height = height
-        self.height_limit = height_limit
-        self.n_attributes = n_attributes
-        self.n_hyperplanes = n_hyperplanes
+        self.height: int = height
+        self.height_limit: int = height_limit
+        self.n_attributes: int = n_attributes
+        self.n_hyperplanes: int = n_hyperplanes
         self.root: InternalNode | ExternalNode = None
 
     def fit(self, X: np.ndarray) -> InternalNode | ExternalNode:
-        if self.height >= self.height_limit or X.shape[0] <= 2:
+        if (
+            # self.height >= self.height_limit or 
+            X.shape[0] <= 2 or
+            all(np.std(X, axis=0) <= 1e-10)
+        ):
             self.root = ExternalNode(size=X.shape[0], data=X)
             return self.root
         
+        # select the attributes that have the minimum std allowed
+        attrs_valid = np.where(np.std(X, axis=0) > 1e-10)[0]
+        n_attributes_tree = min(len(attrs_valid), self.n_attributes)
+
         # randomly select coefficients and attributes for the hyperplanes
-        coeffs = np.random.uniform(-1, 1, size=(self.n_hyperplanes, self.n_attributes))
+        coeffs = np.random.uniform(-1, 1, size=(self.n_hyperplanes, n_attributes_tree))
         attrs = np.array([
-            np.random.choice(range(0, X.shape[1]), size=(self.n_attributes), replace=False) 
+            np.random.choice(attrs_valid, size=(n_attributes_tree), replace=False) 
             for _ in range(self.n_hyperplanes)
         ])
 
@@ -64,7 +72,7 @@ class SCITree:
 
         # compute the standard deviation for the attributes
         # that correspond to the best hyperplane
-        attrs_stds = np.array([np.std(X[:, attrs[Y_best_idx][i]]) for i in range(self.n_attributes)])
+        attrs_stds = np.array([np.std(X[:, attrs[Y_best_idx][i]]) for i in range(n_attributes_tree)])
         
         X_left = X[Y < Y_best_split_value]
         X_right = X[Y >= Y_best_split_value]
@@ -95,12 +103,10 @@ class SCITree:
         Projects the given dataset using the coefficients 
         and the attributes given.
         """
-        projection = np.zeros(X.shape[0])
-    
-        for i in range(self.n_attributes):
-            projection = projection + coefficients[i] * X[:, attributes[i]] / np.std(X[:, attributes[i]])
-
-        return projection
+        return np.sum(
+            coefficients * (X[:, attributes] / np.std(X[:, attributes], axis=0)),
+            axis=1
+        )
     
     def hyperplane_projection_from_node(
         self, 
@@ -118,14 +124,12 @@ class SCITree:
         node: InternalNode
             Current node where the sample is positioned in the SCITree.
         """
-        projection = 0
+        return np.sum(node.split_coeff * ((x[node.split_attr]) / node.split_attr_stds))
 
-        for i in range(self.n_attributes):
-            projection = projection + node.split_coeff[i] * x[node.split_attr[i]] / node.split_attr_stds[i]
-
-        return projection
-
-    def hyperplane_select(self, Ys: np.ndarray) -> t.Tuple[int, float]:
+    def hyperplane_select(
+        self, 
+        Ys: np.ndarray,
+    ) -> t.Tuple[int, float]:
         """
         Computes the average gain obtained from each hyperplane, searching
         for the best split value for each of them. The scope is to find
@@ -141,7 +145,7 @@ class SCITree:
         (index, best_split_value): (int, float)
             The index corresponding to the hyperplane found and its best split value.
         """
-        best_sd_gain = 0
+        best_sd_gain = float("-inf")
         best_split_value = None
         index = None
 
@@ -172,10 +176,10 @@ class SCITree:
                 Y_right_std = np.sqrt(np.sum((Y_sorted[j:] - Y_right_mean) ** 2) / Y_right_size)
 
                 # compute pooled gain
-                pool_gain = self.avg_gain(Y_std, Y_left_std, Y_right_std)
+                avg_gain = self.avg_gain(Y_std, Y_left_std, Y_right_std)    
 
-                if pool_gain > best_sd_gain:
-                    best_sd_gain = pool_gain
+                if avg_gain > best_sd_gain:
+                    best_sd_gain = avg_gain
                     best_split_value = Y_sorted[j]
                     index = i
 
@@ -189,9 +193,11 @@ class SCITree:
         -----------
         Y_std: float
             Original standard deviation of the projections.
+
         Y_left_std: float
             Standard deviation of the left values from the original projections, 
             smaller then the split value.
+
         Y_right_std: float
             Standard deviation of the right values from the original projections, 
             higher then the split value.
@@ -204,16 +210,23 @@ class SCIForest:
         self, 
         n_trees: int = 100, 
         sub_sample_size: int = 256, 
+        contamination: t.Optional[float] = 0.1,
         height_limit: t.Optional[int] = None,
         n_processes: int = 8
     ):
-        self.n_trees = n_trees
-        self.sub_sample_size = sub_sample_size
+        # initialize parameters passed from the constructor
+        self.n_trees: int = n_trees
+        self.sub_sample_size: int = sub_sample_size
+        self.contamination: float = contamination
         self.n_processes: int = n_processes if n_processes else multiprocessing.cpu_count()
         self.height_limit: int = height_limit if height_limit else np.ceil(np.log2(self.sub_sample_size))
         
+        # initialize parameters used for fitting
         self.expected_depth: float = self.c(sub_sample_size)
         self.sci_trees: t.List[SCITree] = []
+        self.decision_scores: t.List[float] = []
+        self.threshold: t.Optional[float] = None
+        self.labels: t.List[int] = []
 
     def c(self, size: int) -> float:
         """
@@ -267,6 +280,30 @@ class SCIForest:
         
         self.sci_trees = sci_trees 
     
+        # compute the scores for the training data
+        self.decision_scores = self.scores(X)
+        # compute the threshold and labels for the training data
+        self.threshold = np.quantile(self.decision_scores, 1 - self.contamination)
+        self.labels = (self.decision_scores > self.threshold).astype(int)
+
+    def predict(self, X: np.ndarray) -> None:
+        """
+        Predicts the outlier labels for the given data, based
+        on the threshold defined when the forest was trained.
+
+        Parameters:
+        -----------
+        X: np.ndarray
+            Data that needs to be predicted.  
+        """
+        # compute the scores for the data
+        X_scores = self.scores(X)
+
+        # compute the outlier labels
+        X_labels = (X_scores > self.threshold).astype(int)
+
+        return X_labels
+
     def path_length(self, x: np.ndarray, sci_tree: SCITree) -> float:
         """
         Computes the path length for a given sample in the given SCITree.
