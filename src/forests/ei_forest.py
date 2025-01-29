@@ -30,10 +30,10 @@ class EITree:
         self, 
         height: int, 
         height_limit: int,
-        extension_level: int = 0,    
+        extension_level: int = 2,    
     ):
-        self.height = height
-        self.height_limit = height_limit
+        self.height: int = height
+        self.height_limit: int = height_limit
         self.extension_level: int = extension_level
         self.root: InternalNode | ExternalNode = None
 
@@ -51,17 +51,19 @@ class EITree:
             return self.root
         
         # randomly choose the split slope
-        idxs = np.random.choice(range(X.shape[1]), self.extension_level, replace=False)
+        idxs = np.random.choice(range(X.shape[1]), X.shape[1] - self.extension_level, replace=False)
         split_slope = np.random.normal(loc=0.0, scale=1.0, size=X.shape[1])
         split_slope[idxs] = 0
         # randomly choose the split intercept
         split_intercept = np.random.uniform(X.min(axis=0), X.max(axis=0))
+        split_intercept[idxs] = 0
+
         # compute the branching criteria
         split_criteria = np.dot(X - split_intercept, split_slope)
 
         # compute the split of the data
-        X_left = X[split_criteria < 0] 
-        X_right = X[split_criteria >= 0]
+        X_left = X[split_criteria <= 0] 
+        X_right = X[split_criteria > 0]
 
         # compute the left and right side of the tree
         node_left = EITree(self.height + 1, self.height_limit).fit(X_left)
@@ -76,16 +78,23 @@ class EIForest:
         self, 
         n_trees: int = 100, 
         sub_sample_size: int = 256, 
+        contamination: float = 0.1,
         height_limit: t.Optional[int] = None,
         n_processes: int = 8
     ):
-        self.n_trees = n_trees
-        self.sub_sample_size = sub_sample_size
-        self.n_processes: int = n_processes if n_processes else multiprocessing.cpu_count()
+        # initialize parameters passed from the constructor
+        self.n_trees: int = n_trees
+        self.sub_sample_size: int = sub_sample_size
+        self.contamination: float = contamination
         self.height_limit: int = height_limit if height_limit else np.ceil(np.log2(self.sub_sample_size))
+        self.n_processes: int = n_processes if n_processes else multiprocessing.cpu_count()
         
+        # initialize parameters used for fitting
         self.expected_depth: float = self.c(sub_sample_size)
         self.ei_trees: t.List[EITree] = []
+        self.decision_scores: t.List[float] = []
+        self.threshold: t.Optional[float] = None
+        self.labels: t.List[int] = []
 
     def c(self, size: int) -> float:
         """
@@ -139,6 +148,30 @@ class EIForest:
         
         self.ei_trees = ei_trees 
 
+        # compute the scores for the training data
+        self.decision_scores = self.scores(X)
+        # compute the threshold and labels for the training data
+        self.threshold = np.quantile(self.decision_scores, 1 - self.contamination)
+        self.labels = (self.decision_scores > self.threshold).astype(int)
+
+    def predict(self, X: np.ndarray) -> None:
+        """
+        Predicts the outlier labels for the given data, based
+        on the threshold defined when the forest was trained.
+
+        Parameters:
+        -----------
+        X: np.ndarray
+            Data that needs to be predicted.  
+        """
+        # compute the scores for the data
+        X_scores = self.scores(X)
+
+        # compute the outlier labels
+        X_labels = (X_scores > self.threshold).astype(int)
+
+        return X_labels
+
     def path_length(self, x: np.ndarray, ei_tree: EITree) -> float:
         """
         Computes the path length for a given sample in the given ITree.
@@ -156,7 +189,7 @@ class EIForest:
         while not isinstance(node, ExternalNode):
             y = np.dot(x - node.split_intercept, node.split_slope)
 
-            if y < 0:
+            if y <= 0:
                 node = node.left
             else:
                 node = node.right

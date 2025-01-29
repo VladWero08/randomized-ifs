@@ -25,8 +25,8 @@ class InternalNode:
 
 class ITree:
     def __init__(self, height: int, height_limit: int):
-        self.height = height
-        self.height_limit = height_limit
+        self.height: int = height
+        self.height_limit: int = height_limit
         self.root: InternalNode | ExternalNode = None
 
     def fit(self, X: np.ndarray) -> InternalNode | ExternalNode:
@@ -66,16 +66,23 @@ class IForest:
         self, 
         n_trees: int = 100, 
         sub_sample_size: int = 256, 
+        contamination: float = 0.1,
         height_limit: t.Optional[int] = None,
         n_processes: int = 8
     ):
-        self.n_trees = n_trees
-        self.sub_sample_size = sub_sample_size
-        self.n_processes = n_processes if n_processes else multiprocessing.cpu_count()
+        # initialize parameters passed from the constructor
+        self.n_trees: int = n_trees
+        self.sub_sample_size: int = sub_sample_size
+        self.contamination: float = contamination
         self.height_limit: int = height_limit if height_limit else np.ceil(np.log2(self.sub_sample_size))
-        
+        self.n_processes: int = n_processes if n_processes else multiprocessing.cpu_count()        
+
+        # initialize parameters used for fitting
         self.expected_depth: float = self.c(sub_sample_size)
         self.itrees: t.List[ITree] = []
+        self.decision_scores: t.List[float] = [] 
+        self.threshold: t.Optional[float] = None
+        self.labels: t.List[int] = []
 
     def c(self, size: int) -> float:
         """
@@ -124,12 +131,35 @@ class IForest:
         """
         self.X = X
 
-        # use a pool to compute the trees in parallel
         with multiprocessing.Pool(processes=self.n_processes) as pool:
-            # assign the scitree training to the pool
             itrees = pool.map(self.fit_itree, range(self.n_trees))
         
         self.itrees = itrees 
+        
+        # compute the scores for the training data
+        self.decision_scores = self.scores(X)
+        # compute the threshold and labels for the training data
+        self.threshold = np.quantile(self.decision_scores, 1 - self.contamination)
+        self.labels = (self.decision_scores > self.threshold).astype(int)
+
+    def predict(self, X: np.ndarray) -> None:
+        """
+        Predicts the outlier labels for the given data, based
+        on the threshold defined when the forest was trained.
+
+        Parameters:
+        -----------
+        X: np.ndarray
+            Data that needs to be predicted.  
+        """
+        # compute the scores for the data
+        X_scores = self.scores(X)
+
+        # compute the outlier labels
+        X_labels = (X_scores > self.threshold).astype(int)
+
+        return X_labels
+
 
     def path_length(self, x: np.ndarray, itree: ITree) -> float:
         """
