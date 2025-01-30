@@ -3,6 +3,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
+import matplotlib.colors as mcolors
 
 from forests.i_forest import IForest
 from forests.ei_forest import EIForest
@@ -30,6 +31,7 @@ def figure_to_img(fig: Figure) -> np.ndarray:
 
 def compare_methods(
     X_train: np.ndarray,
+    title: str = "clustered",
     save: bool = False,    
 ) -> None:
     """
@@ -87,7 +89,7 @@ def compare_methods(
 
     # save the plots
     if save:
-        i_forest_fig.savefig("if_decision_area", format="png", dpi=300)
-        ei_forest_fig.savefig("eif_decision_area", format="png", dpi=300)
-        sci_forest_fig.savefig("sci_decision_area", format="png", dpi=300)
-        fc_forest_fig.savefig("fc_decision_area", format="png", dpi=300)
+        i_forest_fig.savefig(f"{title}_if_decision_area.png", format="png", dpi=300)
+        ei_forest_fig.savefig(f"{title}_eif_decision_area.png", format="png", dpi=300)
+        sci_forest_fig.savefig(f"{title}_sci_decision_area.png", format="png", dpi=300)
+        fc_forest_fig.savefig(f"{title}_fc_decision_area.png", format="png", dpi=300)
