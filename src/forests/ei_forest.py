@@ -157,10 +157,8 @@ class EIForest:
         self.X = X
 
         with multiprocessing.Pool(processes=self.n_processes) as pool:
-            ei_trees = pool.map(self.fit_ei_tree, range(self.n_trees))
+            self.ei_trees = pool.map(self.fit_ei_tree, range(self.n_trees))
         
-        self.ei_trees = ei_trees 
-
         # compute the scores for the training data
         self.decision_scores = self.scores(X)
         # compute the threshold and labels for the training data
@@ -240,15 +238,15 @@ class EIForest:
             return None
 
         xx, yy = np.meshgrid(
-            np.linspace(self.X[:, 0].min(), self.X[:, 0].max(), 100),
-            np.linspace(self.X[:, 1].min(), self.X[:, 1].max(), 100),
+            np.linspace(-10, 20, 150),
+            np.linspace(-10, 20, 150),
         )
         points = np.c_[xx.ravel(), yy.ravel()]
         scores = self.scores(points)
         scores = scores.reshape(xx.shape)
 
         fig, ax = plt.subplots(figsize=(10, 8))
-        ax.contourf(xx, yy, scores, levels=15, cmap="coolwarm")
+        ax.contourf(xx, yy, scores, levels=50, cmap="coolwarm")
         ax.set_title("EIF")
 
         return fig

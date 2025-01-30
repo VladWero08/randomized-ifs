@@ -333,9 +333,9 @@ class FCForest:
             search for a BST is computed on. 
         """        
         if size > 2:
-            # H = np.log(size - 1) + 0.5772156649
-            # return 2 * H - 2 * (size - 1) / size
-            return np.log2(size)
+            H = np.log(size - 1) + 0.5772156649
+            return 2 * H - 2 * (size - 1) / size
+            # return np.log2(size)
 
         if size == 2:
             return 1
@@ -376,10 +376,8 @@ class FCForest:
         self.X = X
 
         with multiprocessing.Pool(processes=self.n_processes) as pool:
-            fcf_trees = pool.map(self.fit_fc_tree, range(self.n_trees))
+            self.fcf_trees = pool.map(self.fit_fc_tree, range(self.n_trees))
         
-        self.fcf_trees = fcf_trees 
-
         # compute the scores for the training data
         self.decision_scores = self.scores(X)
         # compute the threshold and labels for the training data
@@ -465,15 +463,15 @@ class FCForest:
             return None
 
         xx, yy = np.meshgrid(
-            np.linspace(self.X[:, 0].min(), self.X[:, 0].max(), 100),
-            np.linspace(self.X[:, 1].min(), self.X[:, 1].max(), 100),
+            np.linspace(-10, 20, 150),
+            np.linspace(-10, 20, 150),
         )
         points = np.c_[xx.ravel(), yy.ravel()]
         scores = self.scores(points)
         scores = scores.reshape(xx.shape)
 
         fig, ax = plt.subplots(figsize=(10, 8))
-        ax.contourf(xx, yy, scores, levels=15, cmap="coolwarm")
+        ax.contourf(xx, yy, scores, levels=50, cmap="coolwarm")
         ax.set_title("FCF")
 
         return fig

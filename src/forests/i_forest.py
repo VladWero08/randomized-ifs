@@ -71,12 +71,14 @@ class IForest:
         n_processes: int = 8,
         seed: int = 1,
     ):
+        # initialize parameters passed from the constructor
         self.n_trees: int = n_trees
         self.sub_sample_size: int = sub_sample_size
         self.contamination: float = contamination
         self.height_limit: int = height_limit if height_limit else np.ceil(np.log2(self.sub_sample_size))
         self.n_processes: int = n_processes if n_processes else multiprocessing.cpu_count()
         
+        # initialize parameters used for fitting
         self.expected_depth: float = self.c(sub_sample_size)
         self.itrees: t.List[ITree] = []
         self.decision_scores: t.List[float] = [] 
@@ -110,9 +112,7 @@ class IForest:
         self.X = X
 
         with multiprocessing.Pool(processes=self.n_processes) as pool:
-            itrees = pool.map(self.fit_itree, range(self.n_trees))
-        
-        self.itrees = itrees 
+            self.itrees = pool.map(self.fit_itree, range(self.n_trees))
         
         # compute the scores for the training data
         self.decision_scores = self.scores(X)
@@ -161,14 +161,14 @@ class IForest:
             return None
 
         xx, yy = np.meshgrid(
-            np.linspace(self.X[:, 0].min(), self.X[:, 0].max(), 100),
-            np.linspace(self.X[:, 1].min(), self.X[:, 1].max(), 100),
+            np.linspace(-10, 20, 150),
+            np.linspace(-10, 20, 150),
         )
         points = np.c_[xx.ravel(), yy.ravel()]
         scores = self.scores(points).reshape(xx.shape)
 
         fig, ax = plt.subplots(figsize=(10, 8))
-        ax.contourf(xx, yy, scores, levels=15, cmap="coolwarm")
+        ax.contourf(xx, yy, scores, levels=50, cmap="coolwarm")
         ax.set_title("IF")
 
         return fig
