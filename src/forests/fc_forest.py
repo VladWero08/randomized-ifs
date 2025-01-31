@@ -333,9 +333,7 @@ class FCForest:
             search for a BST is computed on. 
         """        
         if size > 2:
-            H = np.log(size - 1) + 0.5772156649
-            return 2 * H - 2 * (size - 1) / size
-            # return np.log2(size)
+            return np.log2(size)
 
         if size == 2:
             return 1
